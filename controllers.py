@@ -145,7 +145,7 @@ class HttpController:
 
     async def restart_daemons(self,eid,config,force_restart=False,timeout_recovery=False,wait_timeout_sec=30):
         response=await self.client.post(config.run_control_api.api+'/api/v1/webutil/restart',
-            json={'processes':config.babimo.selected(),'efn':config.babimo.efn,'force_after_stop':force_restart and not timeout_recovery,
+            json={'processes':list(dict.fromkeys(config.babimo.selected()+(['babinfo','babild'] if force_restart else []))),'efn':config.babimo.efn,'force_after_stop':force_restart and not timeout_recovery,
                   'force_after_timeout':timeout_recovery,'wait_timeout_sec':wait_timeout_sec},headers=auth_headers(config.run_control_api,'BABIRL_API_TOKEN'),timeout=120)
         data=response.json()
         if not response.is_success:raise RemoteAPIError(response.status_code,data)

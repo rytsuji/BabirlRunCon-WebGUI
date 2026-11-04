@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261104-release-review-2";
+const GUI_BUILD = "v1-20261104-stop-recovery-3";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -165,9 +165,7 @@ function newExperimentPage() {
 
 async function controlPage(eid, config, version) {
   const base = `/api/experiments/${encodeURIComponent(eid)}`;
-  let historyMode = "saved", restartOverride=false, stopRecoveryTimer=null;
-  const stopPrompts=new Set();
-  const waitChoices=new Map();
+  let historyMode = "saved", restartOverride=false;
   let stopWaitStarted=null, stopWaitTicker=null, stopWaitId=null;
   let lastErrorSignature='', lastRestartFinished=null, lastTransitionId=null;
   let current = null, historyData = {runs:[], recall:{runs:[]}, operations:[]};
@@ -309,41 +307,17 @@ async function controlPage(eid, config, version) {
     $("#stop-wait").textContent=`Stop sent · verifying DAQ / ES… ${elapsed} s / ${limit} s`;
     if(elapsed<limit)stopWaitTicker=setTimeout(updateStopWait,1000);
   }
-  async function enableEmergencyRestart(recovery) {
-    if(!recovery?.eligible || version!==routeVersion)return;
-    if(!await confirmAction("Stop was not confirmed", "Stop / ES verification failed. Enable emergency Restart DAQ? This allows restarting even if DAQ still reports RUNNING and may interrupt acquisition. Nothing will restart until you press Restart DAQ.","Yes, enable"))return;
-    await api(base+"/restart-unlock",{method:"POST",body:{stop_operation_id:recovery.stop_operation_id}});
-    if(version!==routeVersion)return;
-    restartOverride=true;controls();
-    $("#connection-warning").hidden=false;
-    $("#connection-warning").innerHTML='<div class="notice red">Emergency Restart DAQ enabled. Press Restart DAQ to recover.</div>';
-    clearStopWait(); $("#toast").hidden=true;
-  }
-  async function checkStopTimeout(stopId) {
-    if(version!==routeVersion)return;
-    try{
-      const result=await api(base+"/stop-recovery");
-      const recovery=result.stop_recovery;
-      if(!recovery || recovery.stop_operation_id!==stopId || result.restart_unlocked){clearStopWait();return;}
-      if(!recovery.eligible){stopRecoveryTimer=setTimeout(()=>checkStopTimeout(stopId),(recovery.wait_seconds+.05)*1000);return;}
-      clearStopWait();
-      if($("#confirm-dialog").open){stopRecoveryTimer=setTimeout(()=>checkStopTimeout(stopId),500);return;}
-      if(!stopPrompts.has(stopId)){stopPrompts.add(stopId);await enableEmergencyRestart(recovery);}
-    }catch(error){if(version===routeVersion)toast(error.message,true);}
-  }
-
   for (const action of ["start","stop","nssta","restart"]) {
     const button = $("#"+action); if (!button) continue;
     button.onclick = async () => {
-      if (action === "restart" && !await confirmAction(restartOverride ? "Emergency Restart DAQ?" : "Restart DAQ?", restartOverride ? "Stop was not confirmed. Restart now even if acquisition is still running? The unfinished Run will be interrupted after DAQ is verified idle. Post-run APIs will not run." : "Restart the selected processes and configured Restart APIs? Any unfinished Run will be closed only after DAQ is verified idle.", "Restart DAQ")) return;
+      if (action === "restart" && !await confirmAction(restartOverride ? "Emergency Restart DAQ?" : "Restart DAQ?", restartOverride ? "Stop was not confirmed. Restart babinfo and babild, plus the selected processes and Restart APIs, even if acquisition is still running? The unfinished Run will be interrupted after DAQ is verified idle. Post-run APIs will not run." : "Restart the selected processes and configured Restart APIs? Any unfinished Run will be closed only after DAQ is verified idle.", "Restart DAQ")) return;
       pending = true; controls();
       if(action==="stop"){clearStopWait();stopWaitStarted=performance.now();stopWaitId=null;updateStopWait();}
       try {
         const accepted=await api(base+"/actions", {method:"POST",body:{action,header:$("#run-header").value,force_restart:action==="restart" && restartOverride}});
         if(action==="stop"){
           stopWaitId=accepted.id;
-          restartOverride=false;clearTimeout(stopRecoveryTimer);
-          stopRecoveryTimer=setTimeout(()=>checkStopTimeout(accepted.id),(config.run_control_api.restart_enable_after_sec ?? 5)*1000+50);
+          restartOverride=false;
         }
         if(["start","nssta","restart"].includes(action))restartOverride=false;
         $("#toast").hidden=true;
@@ -407,19 +381,19 @@ async function controlPage(eid, config, version) {
       if (version !== routeVersion) return;
       current = status; restartOverride=!!status.restart_unlocked; historyData = hist;
       const waiting=status.active_operation;
-      const restartWaitMessage=status.restart_unlocked ? "Restart DAQ is available." : `Restart DAQ can be enabled after ${waiting?.restart_enable_after_sec ?? config.run_control_api.restart_enable_after_sec ?? 5} s from the button press.`;
       if(waiting?.wait_started_at){
-        clearTimeout(stopRecoveryTimer);clearTimeout(stopWaitTicker);
+        clearTimeout(stopWaitTicker);
         const elapsed=Math.max(0,Math.floor((Date.now()-Date.parse(waiting.created_at))/1000));
+        const recovery=status.stop_recovery;
+        const recoveryMessage=status.restart_unlocked ? "Restart DAQ is available." : waiting.action==="stop" && status.control_errors?.length
+          ? `Restart DAQ available in ${Math.ceil(recovery?.wait_seconds ?? 0)} s if errors remain.` : "";
         $("#stop-wait").hidden=false;
-        $("#stop-wait").textContent=waiting.wait_timed_out
-          ? (waitChoices.get(waiting.id)===false ? `Timeout reached · ${elapsed} s elapsed. ${restartWaitMessage}` : `Waiting ${waiting.action==='nssta' ? 'start' : waiting.action} · ${elapsed} s elapsed. ${restartWaitMessage}`)
-          : `Waiting ${waiting.action==='nssta' ? 'start' : waiting.action} · ${elapsed} s / ${waiting.wait_timeout_sec} s`;
-        if(waiting.wait_timed_out && !waitChoices.has(waiting.id) && !$("#confirm-dialog").open){
-          waitChoices.set(waiting.id,null);
-          confirmAction('Wait timeout reached',`${waiting.action.toUpperCase()} has exceeded ${waiting.wait_timeout_sec} seconds. Continue waiting? ${restartWaitMessage} Restart requires a separate manual confirmation.`,'Yes, keep waiting').then(choice=>{if(version===routeVersion)waitChoices.set(waiting.id,choice);});
-        }
-      }else if(waitChoices.size || stopWaitId){clearStopWait();}
+        $("#stop-wait").textContent=`${waiting.action.toUpperCase()} ${waiting.wait_timed_out ? "timeout" : "pending"} · ${elapsed} s elapsed / ${waiting.wait_timeout_sec} s timeout. ${recoveryMessage}`;
+      }else if(status.stop_recovery && status.control_errors?.length && !status.restart_unlocked){
+        clearTimeout(stopWaitTicker);
+        $("#stop-wait").hidden=false;
+        $("#stop-wait").textContent=`Stop failed · ${Math.floor(status.stop_recovery.elapsed_seconds)} s elapsed. Restart DAQ available in ${Math.ceil(status.stop_recovery.wait_seconds)} s if errors remain.`;
+      }else{clearStopWait();}
       const retainedErrors=status.control_errors || [];
       $("#control-errors").hidden=!retainedErrors.length;
       $("#control-errors").innerHTML=retainedErrors.map(error=>`<div><strong>${html(error.action.toUpperCase())} failed</strong>${error.messages.map(message=>`<div style="white-space:pre-wrap;overflow-wrap:anywhere">${html(message)}</div>`).join('')}</div>`).join('');
@@ -478,10 +452,6 @@ async function controlPage(eid, config, version) {
       if(status.restart_unlocked){
         warning.hidden=false;
         warning.innerHTML='<div class="notice red">Restart DAQ is available. Waiting does not resend the command. Restart requires manual confirmation.</div>';
-      }else if(status.stop_recovery?.eligible && !status.eb_owner){
-        warning.hidden=false;
-        warning.innerHTML='<div class="notice red"><p>Stop / ES verification failed. Enable emergency Restart DAQ?</p><button class="button small" id="enable-emergency-restart">Enable Restart DAQ</button></div>';
-        $("#enable-emergency-restart").onclick=()=>enableEmergencyRestart(status.stop_recovery).catch(error=>toast(error.message,true));
       }
       const signature = JSON.stringify([hist,historyMode]);
       if (signature !== lastHistory) {
@@ -564,7 +534,7 @@ async function editorPage(eid, data, version) {
     $("#editor-form").innerHTML = `<div class="editor-content">
       <section class="panel"><div class="panel-head"><h2>Experiment</h2><span class="small-text muted">Name / Description</span></div><div class="panel-body">${field("Experiment URL path (ID)","edit-id",config.experiment.id,'maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,63}"')}<p class="form-note">/experiments/&lt;ID&gt; · Letters, numbers, hyphens and underscores. Changing this moves the existing settings and history to the new URL.</p>${field("Name","edit-name",config.experiment.name,'maxlength="200"')}<div class="field"><label for="edit-description">Description</label><textarea id="edit-description">${html(config.experiment.description)}</textarea></div></div></section>
       <section class="panel"><div class="panel-head"><h2>Event Builder</h2></div><div class="panel-body"><div class="two-columns">${field("Name","edit-eb-name",config.eb.name)}${field("Host","edit-eb-host",config.eb.host)}</div></div></section>
-      <section class="panel"><div class="panel-head"><h2>Run Control API</h2></div><div class="panel-body">${field("Name","edit-api-name",config.run_control_api.name)}${field("Base URL","edit-api-url",config.run_control_api.api,'type="url"')}${field("Event polling interval (seconds)","edit-event-interval",config.run_control_api.event_poll_interval_sec ?? 2,'type="number" min="1" max="3600" step="0.5"')}${field("Start timeout (seconds)","edit-start-timeout",config.run_control_api.start_timeout ?? 10,'type="number" min="1" max="3600"')}${field("Stop timeout (seconds)","edit-stop-timeout",config.run_control_api.stop_timeout ?? 10,'type="number" min="1" max="3600"')}${field("Enable Restart DAQ after (seconds)","edit-restart-delay",config.run_control_api.restart_enable_after_sec ?? 5,'type="number" min="1" max="3600"')}${field("Idle connection check interval (seconds) · fixed at 2","edit-idle-interval",2,'type="number" disabled')}<p class="form-note">Start/Stop timeout asks whether to keep waiting. Restart enable delay is separate and counts from the button press. No commands are resent. Idle checks are read-only.</p>${field("Token environment variable (optional)","edit-api-token",config.run_control_api.token_env || "",'placeholder="BABIRL_API_TOKEN"')}<p class="form-note">Tokens stay on the backend. Enter an environment variable name, not the token.</p><div class="section"><label class="check-label"><input type="checkbox" id="edit-nssta" ${config.run_control_api.enable_nssta ? "checked" : ""}>Enable NSSTA (non-saving acquisition)</label></div></div></section>
+      <section class="panel"><div class="panel-head"><h2>Run Control API</h2></div><div class="panel-body">${field("Name","edit-api-name",config.run_control_api.name)}${field("Base URL","edit-api-url",config.run_control_api.api,'type="url"')}${field("Event polling interval (seconds)","edit-event-interval",config.run_control_api.event_poll_interval_sec ?? 2,'type="number" min="1" max="3600" step="0.5"')}${field("Start timeout (seconds)","edit-start-timeout",config.run_control_api.start_timeout ?? 10,'type="number" min="1" max="3600"')}${field("Stop timeout (seconds)","edit-stop-timeout",config.run_control_api.stop_timeout ?? 10,'type="number" min="1" max="3600"')}${field("Enable Restart DAQ after (seconds)","edit-restart-delay",config.run_control_api.restart_enable_after_sec ?? 5,'type="number" min="1" max="3600"')}${field("Idle connection check interval (seconds) · fixed at 2","edit-idle-interval",2,'type="number" disabled')}<p class="form-note">Start/Stop timeout defines when a timeout error appears. Restart enable delay counts from the Stop click and applies while errors remain. No commands are resent. Idle checks are read-only.</p>${field("Token environment variable (optional)","edit-api-token",config.run_control_api.token_env || "",'placeholder="BABIRL_API_TOKEN"')}<p class="form-note">Tokens stay on the backend. Enter an environment variable name, not the token.</p><div class="section"><label class="check-label"><input type="checkbox" id="edit-nssta" ${config.run_control_api.enable_nssta ? "checked" : ""}>Enable NSSTA (non-saving acquisition)</label></div></div></section>
       <section class="panel"><div class="panel-head"><h2>babimo · Restart DAQ</h2></div><div class="panel-body"><p class="form-note">Restart selected processes on the EB host via babimo. Saved per experiment. New experiments select babinfo and babild. babinfo and babild are stopped together; babinfo starts before babild.</p>${field("EB fragment number for offline recovery (optional)","edit-babimo-efn",config.babimo?.efn ?? "",'type="number" min="0" max="255" placeholder="Use the actual EB fragment number"')}<div class="babimo-options section">${["babinfo","babild","babissm","babian"].map(name=>`<label class="check-label"><input id="babimo-${name}" type="checkbox" ${config.babimo?.[name] ? "checked" : ""}>${name}</label>`).join("")}</div></div></section>
       ${["start","stop","restart"].map(type => `<section class="panel"><div class="panel-head"><h2>${{start:"Pre-run APIs",stop:"Post-run APIs",restart:"Restart APIs"}[type]}</h2><button class="button small" data-add="${type}" type="button">＋ Add API</button></div><div class="panel-body" id="hooks-${type}">${renderHooks(type)}</div></section>`).join("")}</div>`;
     $("#edit-id").disabled=!metadataUnlocked;$("#edit-name").disabled=!metadataUnlocked;

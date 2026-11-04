@@ -103,6 +103,11 @@ class Store:
         with self.connect(eid) as db:
             db.execute("DELETE FROM metadata WHERE key='control_errors'")
 
+    def clear_control_error(self, eid, operation_id):
+        errors=[item for item in self.control_errors(eid) if item['operation_id']!=operation_id]
+        with self.connect(eid) as db:
+            db.execute("INSERT OR REPLACE INTO metadata VALUES ('control_errors',?)",(json.dumps(errors),))
+
     def comment_config_edit(self, eid, edit_id, comment):
         with self.connect(eid) as db:
             return db.execute('UPDATE config_edits SET comment=? WHERE id=?', (comment, edit_id)).rowcount == 1

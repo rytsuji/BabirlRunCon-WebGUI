@@ -21,7 +21,7 @@ from monitor import Monitor
 from service import ControlService
 from storage import Store, now
 
-BUILD_ID = "v1-20261104-release-review-2"
+BUILD_ID = "v1-20261104-stop-recovery-3"
 BASE = Path(__file__).resolve().parent
 
 
@@ -73,10 +73,6 @@ class ActionRequest(Strict):
         if self.action in ("start", "nssta") and ("\x00" in self.header or len(self.header.encode()) > 79):
             raise ValueError("Header must contain at most 79 UTF-8 bytes without NUL; blank preserves the current header")
         return self
-
-
-class RestartUnlock(Strict):
-    stop_operation_id: str
 
 
 class ConfigText(Strict):
@@ -410,7 +406,7 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
             raise HTTPException(409, 'Resolve the retained DAQ errors with Stop or Restart DAQ before starting.')
         recovery=service.stop_recovery(eid,config) if request.force_restart else None
         if request.force_restart and (request.action!='restart' or not service.restart_unlocked(eid,config)):
-            raise HTTPException(409,'Emergency restart is not enabled. Wait for the configured Restart enable delay and confirm the unlock.')
+            raise HTTPException(409,'Emergency restart requires a Stop attempt with errors remaining after the configured Restart enable delay.')
         if request.action=='stop':await service.interrupt_start_for_stop(config)
         if request.action=='restart' and recovery and recovery.get('timeout_recovery'):
             previous=service.active.get(service.key(config))
@@ -438,20 +434,9 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
             if request.action in ('start','nssta'):
                 store.retain_control_error(eid,op,str(exc))
             raise HTTPException(409, str(exc))
-        if request.action in ('start','nssta','restart'):service.restart_unlocks.pop(service.key(config),None)
         initial = copy.deepcopy(op)
         service.start_task(eid, config, op, request.header)
         return initial
-
-    @app.post('/api/experiments/{eid}/restart-unlock')
-    async def restart_unlock(eid:str,body:RestartUnlock):
-        config,_,_=config_for(eid)
-        if owner_of_eb(eid,config):raise HTTPException(409,'This EB is controlled by another experiment.')
-        recovery=service.stop_recovery(eid,config)
-        if not recovery or not recovery['eligible'] or recovery['stop_operation_id']!=body.stop_operation_id:
-            raise HTTPException(409,'The Restart enable delay has not elapsed, or the operation has already completed.')
-        service.restart_unlocks[service.key(config)]=body.stop_operation_id
-        return {'enabled':True}
 
     @app.get('/api/experiments/{eid}/stop-recovery')
     async def stop_recovery(eid:str):

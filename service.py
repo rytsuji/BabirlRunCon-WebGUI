@@ -20,7 +20,6 @@ class ControlService:
         self.active = {}  # EB host -> operation; one backend process only.
         self.tasks = set()
         self.task_by_op = {}
-        self.restart_unlocks = {}
         self.monitor = None
 
     def key(self, config):
@@ -52,6 +51,8 @@ class ControlService:
 
     async def check_restart(self, eid, config, force=False):
         if force:return None
+        if self.store.control_errors(eid):
+            raise RuntimeError('Attempt Stop first. Restart becomes available after the configured delay if errors remain.')
         try:
             state = await self.controller.status(eid, config)
         except Exception:
@@ -66,22 +67,20 @@ class ControlService:
         for op in self.store.operations(eid, limit=100):
             if op['action'] not in ('stop','start','nssta','restart'):continue
             if op['action']=='restart' and op['status']=='failed' and not op['steps']:continue
-            if op.get('wait_started_at') and not op.get('wait_completed') and (op['status']=='running' or op.get('wait_timed_out') or op['action']=='stop'):
+            if op['action']=='stop' and op.get('wait_started_at') and not op.get('stop_confirmed'):
+                if op.get('config_snapshot',{}).get('eb',{}).get('host','').strip().lower()!=self.key(config):return None
                 elapsed=(datetime.now(timezone.utc)-datetime.fromisoformat(op['created_at'])).total_seconds()
                 delay=op.get('restart_enable_after_sec',config.run_control_api.restart_enable_after_sec)
-                return {'stop_operation_id':op['id'],'eligible':elapsed>=delay,'wait_seconds':max(0,delay-elapsed),'timeout_recovery':True,
+                has_error=bool(self.store.control_errors(eid) or op.get('stop_error') or op.get('wait_timed_out'))
+                return {'stop_operation_id':op['id'],'eligible':has_error and elapsed>=delay,'wait_seconds':max(0,delay-elapsed),'timeout_recovery':True,
                         'action':op['action'],'elapsed_seconds':(datetime.now(timezone.utc)-datetime.fromisoformat(op['created_at'])).total_seconds(),
                         'timeout_seconds':delay}
-            if op['action']!='stop' or not op.get('stop_attempt_at') or op.get('stop_confirmed'):return None
-            if op.get('config_snapshot',{}).get('eb',{}).get('host','').strip().lower()!=self.key(config):return None
-            elapsed=(datetime.now(timezone.utc)-datetime.fromisoformat(op['stop_attempt_at'])).total_seconds()
-            if not 0<=elapsed<=120:return None
-            return {'stop_operation_id':op['id'],'eligible':elapsed>=5,'wait_seconds':max(0,5-elapsed)}
+            return None
         return None
 
     def restart_unlocked(self, eid, config):
         recovery=self.stop_recovery(eid,config)
-        return bool(recovery and recovery['eligible'] and self.restart_unlocks.get(self.key(config))==recovery['stop_operation_id'])
+        return bool(recovery and recovery['eligible'])
 
     async def interrupt_start_for_stop(self, config):
         active=self.active.get(self.key(config))
@@ -190,24 +189,19 @@ class ControlService:
         op['restart_enable_after_sec']=config.run_control_api.restart_enable_after_sec
         self.persist(eid,op)
         child=asyncio.create_task(callback())
-        async def enable_later():
-            elapsed=(datetime.now(timezone.utc)-datetime.fromisoformat(op['created_at'])).total_seconds()
-            await asyncio.sleep(max(0,op['restart_enable_after_sec']-elapsed))
-            op['restart_eligible']=True
-            self.restart_unlocks[self.key(config)]=op['id']
+        def record_timeout(message):
+            op.update(wait_timed_out=True,message=message)
+            self.store.retain_control_error(eid,op,message)
             self.persist(eid,op)
-        unlock_task=asyncio.create_task(enable_later())
         try:
             done,_=await asyncio.wait({child},timeout=limit)
             if not done:
-                op.update(wait_timed_out=True,message='Configured wait time exceeded. Continue waiting or restart DAQ manually.')
-                self.persist(eid,op)
+                record_timeout(f"{op['action'].upper()} timeout after {limit:g} seconds. Observing DAQ state without resending the command.")
             try:
                 state=await child
             except Exception as exc:
                 if not self.is_timeout(exc):raise
-                op.update(wait_timed_out=True,message='API wait timed out. Observing DAQ state without resending the command.')
-                self.persist(eid,op)
+                record_timeout('API command timed out. Observing DAQ state without resending the command.')
                 while True:
                     try:
                         state=await self.controller.status(eid,config)
@@ -220,12 +214,11 @@ class ControlService:
                     except Exception:pass
                     await asyncio.sleep(1)
             op['wait_completed']=True
-            self.restart_unlocks.pop(self.key(config),None)
+            if op['action'] in ('start','nssta'):
+                self.store.clear_control_error(eid,op['id'])
             self.persist(eid,op)
             return state
         finally:
-            if not unlock_task.done():unlock_task.cancel()
-            await asyncio.gather(unlock_task,return_exceptions=True)
             if not child.done():child.cancel()
             await asyncio.gather(child,return_exceptions=True)
 
@@ -263,6 +256,10 @@ class ControlService:
                 self.store.remember(eid, state)
             elif action == "stop":
                 run = self.store.active_run(eid)
+                # Preserve already displayed errors without delaying Stop for a read.
+                cached=self.monitor.cache.get(eid,{}) if self.monitor else {}
+                for message in (cached.get('state',{}).get('acquisition_errors') or {}).values():
+                    self.store.retain_control_error(eid,op,str(message))
                 op['stop_attempt_at']=now()
                 op['stop_confirmed']=False
                 self.persist(eid,op)
@@ -295,7 +292,6 @@ class ControlService:
 
                 state=await self.timed_operation(eid,config,op,send_and_confirm,{'stopped'})
                 op['stop_confirmed']=True
-                self.restart_unlocks.pop(self.key(config),None)
                 self.persist(eid,op)
                 if run is None:
                     run={'runname':state['runname'],'runnumber':state['runnumber'],
@@ -322,7 +318,7 @@ class ControlService:
                 restart_errors=[]
                 try:
                     await self.check_restart(eid, config,op.get('force_restart',False))
-                    if config.babimo.selected():
+                    if config.babimo.selected() or op.get('force_restart'):
                         await self.step(eid,op,'Restart selected babimo processes',lambda:self.controller.restart_daemons(eid,config,force_restart=op.get('force_restart',False),timeout_recovery=op.get('timeout_recovery',False),wait_timeout_sec=op.get('recovery_timeout_sec',30)))
                     # Restart hooks are unconditional and do not carry run_on_nssta.
                     for hook in config.restart_api:
@@ -331,6 +327,16 @@ class ControlService:
                 except Exception as exc:
                     restart_errors.append(str(exc) or type(exc).__name__)
                 await self.step(eid,op,'Wait 2 seconds before ES connect',lambda:asyncio.sleep(2))
+                async def ensure_idle():
+                    state=await self.controller.status(eid,config)
+                    if state['state'] in ('running','nssta'):
+                        await self.step(eid,op,'DAQ Stop after Restart',lambda:self.controller.stop(eid,config))
+                    return await self.wait_state(eid,config,{'stopped'})
+                try:
+                    state=await self.step(eid,op,'Verify DAQ is IDLE after Restart',
+                        lambda:asyncio.wait_for(ensure_idle(),max(10,config.run_control_api.stop_timeout)))
+                except Exception as exc:
+                    restart_errors.append(str(exc) or 'DAQ did not reach IDLE after Restart.')
                 async def send_connect_after_restart():
                     result=await self.connections(eid,config,True)
                     errors=[item['error'] for item in result.get('items',[]) if item.get('error')]
@@ -354,13 +360,11 @@ class ControlService:
                     restart_errors.append(str(exc) or type(exc).__name__)
                 if not restart_errors:
                     unfinished=self.store.active_run(eid)
-                    if config.babimo.babild or unfinished or op.get('timeout_recovery'):
-                        state=await self.step(eid,op,'Verify DAQ recovery',lambda:self.wait_state(eid,config,{'stopped'}))
-                        if unfinished:
-                            unfinished.update(status='interrupted',finished_at=now(),daq_config=state['raw_config'],
-                                event_num=state['event_num'],es_event_num=state['es_event_num'],
-                                reconciliation='DAQ restart verified IDLE. Unfinished Run interrupted; post-run APIs were not executed.')
-                            self.store.put_run(eid,unfinished)
+                    if unfinished:
+                        unfinished.update(status='interrupted',finished_at=now(),daq_config=state['raw_config'],
+                            event_num=state['event_num'],es_event_num=state['es_event_num'],
+                            reconciliation='DAQ restart verified IDLE. Unfinished Run interrupted; post-run APIs were not executed.')
+                        self.store.put_run(eid,unfinished)
                 if restart_errors:raise RuntimeError('\n'.join(restart_errors))
             op.update(status="succeeded", message="Completed")
             if action in ('stop','restart'):

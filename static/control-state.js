@@ -26,12 +26,13 @@ function daqControlState({status, pending, draftDirty, header, runname, runnumbe
   const stopReason = stopBusy ? "Another operation is in progress."
     : status?.eb_owner ? "This EB is controlled by another experiment."
     : status?.state?.target?.allow_writes===false ? "The Run Control API has writes disabled."
-    : status?.connected && live==="stopped" && !unresolved && !status?.active_operation && !status?.control_errors?.length ? "DAQ is idle. There is no active acquisition to stop." : "";
+    : status?.connected && live==="stopped" && !unresolved && !status?.active_operation && !status?.control_errors?.length && !Object.keys(status?.state?.acquisition_errors || {}).length ? "DAQ is idle. There is no active acquisition to stop." : "";
   const restartReason = !restartConfigured ? "No Restart API configured. Add one in Edit configuration."
-    : busy && !(status?.restart_unlocked && (status?.active_operation?.wait_timed_out || status?.active_operation?.restart_eligible) && !pending) ? "Another operation is in progress."
+    : busy && !(status?.restart_unlocked && status?.active_operation?.action==='stop' && !pending) ? "Another operation is in progress."
     : status?.eb_owner ? "This EB is controlled by another experiment."
     : status?.state?.target?.allow_writes === false ? "The Run Control API has writes disabled."
-    : status?.connected && ["running","nssta"].includes(live) && !status?.restart_unlocked ? "Attempt Stop first. Restart becomes available when the configured wait timeout is exceeded." : "";
+    : status?.control_errors?.length && !status?.restart_unlocked ? "Attempt Stop first. Restart becomes available after the configured delay if errors remain."
+    : status?.connected && ["running","nssta"].includes(live) && !status?.restart_unlocked ? "Attempt Stop first. Restart becomes available after the configured delay if errors remain." : "";
   return {bytes, editable:!idleReason, startReason, stopReason, setReason, restartReason};
 }
 
