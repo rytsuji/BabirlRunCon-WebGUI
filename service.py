@@ -69,10 +69,20 @@ class ControlService:
             if op['action']=='restart' and op['status']=='failed' and not op['steps']:continue
             if op['action']=='stop' and op.get('wait_started_at') and not op.get('stop_confirmed'):
                 if op.get('config_snapshot',{}).get('eb',{}).get('host','').strip().lower()!=self.key(config):return None
-                elapsed=(datetime.now(timezone.utc)-datetime.fromisoformat(op['created_at'])).total_seconds()
+                clicked=datetime.fromisoformat(op['created_at'])
+                current=datetime.now(timezone.utc)
+                elapsed=(current-clicked).total_seconds()
                 delay=op.get('restart_enable_after_sec',config.run_control_api.restart_enable_after_sec)
-                has_error=bool(self.store.control_errors(eid) or op.get('stop_error') or op.get('wait_timed_out'))
-                return {'stop_operation_id':op['id'],'eligible':has_error and elapsed>=delay,'wait_seconds':max(0,delay-elapsed),'timeout_recovery':True,
+                errors=self.store.control_errors(eid)
+                has_error=bool(errors or op.get('stop_error') or op.get('wait_timed_out'))
+                error_times=[datetime.fromisoformat(item['created_at']) for item in errors]
+                if op.get('recovery_error_at'):error_times.append(datetime.fromisoformat(op['recovery_error_at']))
+                error_at=max(clicked,min(error_times)) if error_times else None
+                error_elapsed=max(0,(current-error_at).total_seconds()) if error_at else 0
+                return {'stop_operation_id':op['id'],'eligible':has_error and error_at is not None and error_elapsed>=delay,
+                        'wait_seconds':max(0,delay-error_elapsed),'timeout_recovery':True,
+                        'error_started_at':error_at.isoformat() if error_at else None,'error_elapsed_seconds':error_elapsed,
+                        'minimum_stop_age_sec':(error_at-clicked).total_seconds()+delay if error_at else delay,
                         'action':op['action'],'elapsed_seconds':(datetime.now(timezone.utc)-datetime.fromisoformat(op['created_at'])).total_seconds(),
                         'timeout_seconds':delay}
             return None
@@ -264,6 +274,7 @@ class ControlService:
                 cached=self.monitor.cache.get(eid,{}) if self.monitor else {}
                 for message in (cached.get('state',{}).get('acquisition_errors') or {}).values():
                     self.store.retain_control_error(eid,op,str(message))
+                if self.store.control_errors(eid):op['recovery_error_at']=op['created_at']
                 op['stop_attempt_at']=now()
                 op['stop_confirmed']=False
                 self.persist(eid,op)

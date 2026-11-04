@@ -21,7 +21,7 @@ from monitor import Monitor
 from service import ControlService
 from storage import Store, now
 
-BUILD_ID = "v1-20261104-es-recovery-4"
+BUILD_ID = "v1-20261105-reconnect-5"
 BASE = Path(__file__).resolve().parent
 
 
@@ -419,7 +419,7 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
         op = service.reserve(config, eid, request.action)
         op['force_restart']=request.force_restart
         op['timeout_recovery']=bool(recovery and recovery.get('timeout_recovery'))
-        if op['timeout_recovery']:op['recovery_timeout_sec']=recovery['timeout_seconds']
+        if op['timeout_recovery']:op['recovery_timeout_sec']=recovery['minimum_stop_age_sec']
         try:
             if request.action=='restart':
                 await service.check_restart(eid,config,request.force_restart)
