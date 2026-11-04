@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261104-stop-recovery-3";
+const GUI_BUILD = "v1-20261104-es-recovery-4";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -320,6 +320,12 @@ async function controlPage(eid, config, version) {
           restartOverride=false;
         }
         if(["start","nssta","restart"].includes(action))restartOverride=false;
+        if(action==="restart"){
+          clearStopWait();
+          $("#control-errors").hidden=true;
+          $("#control-errors").innerHTML="";
+          $("#connection-warning").hidden=true;
+        }
         $("#toast").hidden=true;
         if (action === "start" || action === "nssta") headerDirty = false;
       } catch (error) { if(action==="stop")clearStopWait();toast(error.message,true); }

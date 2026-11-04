@@ -21,7 +21,7 @@ from monitor import Monitor
 from service import ControlService
 from storage import Store, now
 
-BUILD_ID = "v1-20261104-stop-recovery-3"
+BUILD_ID = "v1-20261104-es-recovery-4"
 BASE = Path(__file__).resolve().parent
 
 
@@ -291,7 +291,7 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
     async def status(eid: str, refresh: bool = False):
         config, _, _ = config_for(eid)
         active=service.active.get(service.key(config))
-        if active and active.get('wait_started_at'):
+        if active and (active.get('wait_started_at') or active['action']=='restart'):
             observed=copy.deepcopy(monitor.cache.get(eid,{'state':{'state':'unknown'},'connected':False}))
             observed.pop('next_events',None)
             observed['es_connections']=monitor.es_connections.get(eid)
@@ -434,6 +434,10 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
             if request.action in ('start','nssta'):
                 store.retain_control_error(eid,op,str(exc))
             raise HTTPException(409, str(exc))
+        if request.action=='restart':
+            # Restart starts a new recovery attempt; prior errors cannot survive it.
+            store.clear_control_errors(eid)
+            monitor.reset_recovery(eid)
         initial = copy.deepcopy(op)
         service.start_task(eid, config, op, request.header)
         return initial

@@ -19,6 +19,12 @@ class Monitor:
         self.cache.clear()  # Other experiment pages may share the same EB.
         self.epoch += 1
 
+    def reset_recovery(self, eid):
+        self.invalidate(eid)
+        self.last_counters.pop(eid,None)
+        self.es_connections.pop(eid,None)
+        self.next_idle_check.pop(eid,None)
+
     async def read(self, eid, config, refresh=False):
         async with self.locks.setdefault(eid, asyncio.Lock()):
             epoch = self.epoch
@@ -41,6 +47,8 @@ class Monitor:
                         live = await self.adapter.status(eid, config)
                         counters = {key: live[key] for key in ("event_num", "es_event_num", "acquisition_errors")}
                         connected = True
+                    if epoch != self.epoch:
+                        return {"state":{"state":"unknown"},"connected":False,"error":None,"es_connections":None}
                     entry["state"].update(counters)
                     self.last_counters[eid]={key:copy.deepcopy(entry['state'].get(key)) for key in ('runname','runnumber','event_num','es_event_num','acquisition_errors')}
                     entry["connected"] = connected and entry["snapshot_at"] is not None
@@ -60,9 +68,11 @@ class Monitor:
                     if checked.get('skipped'):
                         entry['state']['state']={'START':'running','NSSTA':'nssta'}.get(checked.get('runstatus'),'unknown')
                         result['state']['state']=entry['state']['state']
-                    else:self.es_connections[eid]=checked
+                    elif epoch == self.epoch:self.es_connections[eid]=checked
                 except Exception as exc:
-                    self.es_connections[eid]={'supported':True,'items':[],'error':str(exc)}
+                    if epoch == self.epoch:self.es_connections[eid]={'supported':True,'items':[],'error':str(exc)}
+            if epoch != self.epoch:
+                return {"state":{"state":"unknown"},"connected":False,"error":None,"es_connections":None}
             result.pop("next_events", None)
             result["es_connections"] = self.es_connections.get(eid)
             if not result["connected"]:

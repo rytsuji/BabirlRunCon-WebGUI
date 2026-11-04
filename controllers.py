@@ -30,7 +30,10 @@ class RemoteAPIError(RuntimeError):
         self.response = response
         error = response.get("error", {}) if isinstance(response, dict) else {}
         self.outcome_unknown = isinstance(error, dict) and error.get("outcome") == "unknown"
-        self.is_timeout = isinstance(error,dict) and (error.get('code')=='operation_timeout' or any(word in str(error.get('message','')).lower() for word in ('timed out','timeout','deadline exceeded')))
+        # An ES socket failure is a failed command, not a long-running command.
+        # Exact legacy messages keep compatibility with older API installations.
+        self.is_timeout = isinstance(error,dict) and (error.get('code')=='operation_timeout' or error.get('message') in (
+            'command deadline exceeded','native transport failure: command deadline exceeded'))
         message = error.get('message') if isinstance(error,dict) else error
         super().__init__(str(message or f"Run Control API returned HTTP {status_code}: {response}"))
 

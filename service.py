@@ -167,11 +167,12 @@ class ControlService:
                                          query_params if getattr(hook,'send_query_params',False) and hook.argument_transport=='json' else None)
             await self.step(eid, op, hook.name, invoke)
 
-    async def wait_state(self, eid, config, allowed):
+    async def wait_state(self, eid, config, allowed, include_events=True):
+        reader=self.controller.status if include_events else getattr(self.controller,'snapshot',self.controller.status)
         async def wait():
             while True:
                 try:
-                    state = await self.controller.status(eid, config)
+                    state = await reader(eid, config)
                     if state["state"] in allowed:
                         return state
                 except Exception:
@@ -202,7 +203,8 @@ class ControlService:
             except Exception as exc:
                 if not self.is_timeout(exc):raise
                 record_timeout('API command timed out. Observing DAQ state without resending the command.')
-                while True:
+                deadline=asyncio.get_running_loop().time()+self.settings.operation_timeout_sec
+                while asyncio.get_running_loop().time()<deadline:
                     try:
                         state=await self.controller.status(eid,config)
                         if state['state'] in allowed and not state.get('acquisition_errors'):
@@ -213,6 +215,8 @@ class ControlService:
                             break
                     except Exception:pass
                     await asyncio.sleep(1)
+                else:
+                    raise TimeoutError('DAQ state could not be verified before the recovery observation deadline.')
             op['wait_completed']=True
             if op['action'] in ('start','nssta'):
                 self.store.clear_control_error(eid,op['id'])
@@ -328,13 +332,24 @@ class ControlService:
                     restart_errors.append(str(exc) or type(exc).__name__)
                 await self.step(eid,op,'Wait 2 seconds before ES connect',lambda:asyncio.sleep(2))
                 async def ensure_idle():
-                    state=await self.controller.status(eid,config)
+                    # Verify the EB independently of ES event reads; ES may still be down.
+                    reader=getattr(self.controller,'snapshot',self.controller.status)
+                    state=await reader(eid,config)
+                    if state['state']=='stopped':return state
                     if state['state'] in ('running','nssta'):
                         await self.step(eid,op,'DAQ Stop after Restart',lambda:self.controller.stop(eid,config))
-                    return await self.wait_state(eid,config,{'stopped'})
+                    return await self.wait_state(eid,config,{'stopped'},include_events=False)
                 try:
                     state=await self.step(eid,op,'Verify DAQ is IDLE after Restart',
                         lambda:asyncio.wait_for(ensure_idle(),max(10,config.run_control_api.stop_timeout)))
+                    unfinished=self.store.active_run(eid)
+                    if unfinished:
+                        unfinished.update(status='interrupted',finished_at=now(),daq_config=state['raw_config'],
+                            event_num=state['event_num'],es_event_num=state['es_event_num'],
+                            reconciliation='DAQ restart verified IDLE. Unfinished Run interrupted; post-run APIs were not executed.')
+                        self.store.put_run(eid,unfinished)
+                    # DAQ recovery is complete even if a separate ES reconnect fails.
+                    self.store.clear_control_errors(eid)
                 except Exception as exc:
                     restart_errors.append(str(exc) or 'DAQ did not reach IDLE after Restart.')
                 async def send_connect_after_restart():
@@ -358,13 +373,6 @@ class ControlService:
                     await self.step(eid,op,'Check ES connections after Restart',verify_after_restart)
                 except Exception as exc:
                     restart_errors.append(str(exc) or type(exc).__name__)
-                if not restart_errors:
-                    unfinished=self.store.active_run(eid)
-                    if unfinished:
-                        unfinished.update(status='interrupted',finished_at=now(),daq_config=state['raw_config'],
-                            event_num=state['event_num'],es_event_num=state['es_event_num'],
-                            reconciliation='DAQ restart verified IDLE. Unfinished Run interrupted; post-run APIs were not executed.')
-                        self.store.put_run(eid,unfinished)
                 if restart_errors:raise RuntimeError('\n'.join(restart_errors))
             op.update(status="succeeded", message="Completed")
             if action in ('stop','restart'):
@@ -390,7 +398,8 @@ class ControlService:
         finally:
             op["finished_at"] = now()
             self.persist(eid, op)
-            self.active.pop(self.key(config), None)
+            if self.active.get(self.key(config)) is op:
+                self.active.pop(self.key(config), None)
             if self.monitor:
                 self.monitor.invalidate(eid)
 
