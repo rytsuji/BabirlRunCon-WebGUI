@@ -1,0 +1,100 @@
+/* Compact Run Control workspace; other pages retain their existing layout. */
+.compact-control .topbar{height:52px}
+.container.control-page{max-width:1380px;padding-top:12px;padding-bottom:12px}
+.control-page .breadcrumbs{margin-bottom:14px}
+.control-page .page-head{margin-bottom:8px;align-items:center}
+.control-page .eyebrow{margin-bottom:4px}
+.control-page h1{font-size:24px;margin-bottom:4px}
+.control-page .subtitle{font-size:12px;max-width:900px}
+.control-page .tabs{margin-top:6px;gap:24px}
+.control-page .tab{padding-bottom:9px}
+.control-page .section{margin-top:14px}
+.control-workspace{display:grid;grid-template-columns:minmax(0,1.08fr) minmax(0,1fr);grid-template-areas:"settings overview" "operation connections";gap:10px;margin-top:10px;align-items:start}
+.connection-panel{grid-area:connections}
+.operation-panel{grid-area:operation}
+.run-settings-panel{grid-area:settings;border-color:#b9c9e8;box-shadow:0 1px 4px #24466e09}
+.overview-panel{grid-area:overview}
+.control-page .panel-head{padding:8px 14px}
+.control-page .panel-head h2{font-size:14px}
+.control-page .panel-body{padding:10px 14px}
+.control-page .panel-foot{padding:9px 16px;font-size:11px}
+.connection-panel .panel-body{padding-top:5px;padding-bottom:9px}
+.connection-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:5px 0}
+.connection-row + .connection-row{border-top:1px solid var(--line)}
+.connection-row>div{min-width:0;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.connection-label{display:block;color:var(--muted);font-size:9px;font-weight:600;letter-spacing:.7px;margin-bottom:2px}
+.connection-address{display:block;font-size:12px;overflow-wrap:anywhere}
+.connection-row .pill{font-size:10px;padding:3px 7px}
+.connection-panel .form-note{font-size:10px;margin-top:4px}
+.es-connection-details{border-top:1px solid var(--line);padding-top:5px}
+.es-connection-details>summary{display:flex;align-items:center;justify-content:space-between;font-size:11px;gap:10px}
+.es-connection-details>summary:before{content:"▸";font-size:10px;color:var(--muted)}
+.es-connection-details[open]>summary:before{content:"▾"}
+.es-connection-details>summary>span:first-child{flex:1}
+.es-connection-details .pill{font-size:9px;padding:2px 6px}
+.es-connection-list{max-height:105px;overflow:auto;margin-top:6px}
+.es-connection-item{display:grid;grid-template-columns:45px minmax(70px,1fr) auto;gap:5px;font-size:10px;padding:3px 0}
+.es-connection-item>.error-text{grid-column:1/-1}
+.operation-panel #operation-body{max-height:86px;overflow:auto;overscroll-behavior:contain}
+.operation-panel .step-empty{padding:7px 0;text-align:left}
+.operation-panel .step-item{padding:8px 0}
+.operation-panel #operation-body>p{margin-bottom:8px!important}
+.control-page .field{margin-bottom:8px}
+.control-page .field label{margin-bottom:5px;font-size:12px}
+.control-page .field-row{grid-template-columns:minmax(0,1fr) minmax(120px,.52fr);gap:12px}
+.run-settings-panel .panel-head{background:#f4f7fd;border-bottom-color:#dae3f4}
+.run-settings-panel .recall-field{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.run-settings-panel .recall-field label{white-space:nowrap;color:var(--muted);font-size:11px;margin:0}
+.run-settings-panel .recall-field select{padding:6px 9px;font-size:12px}
+.run-settings-panel #run-name,.run-settings-panel #run-number{border-color:#aabddd;background:#fafcff;font-weight:600;font-size:18px;padding:6px 10px;line-height:1.3}
+.run-settings-panel #run-number{color:#204c99}
+.run-settings-panel #run-header{border-color:#aabddd;background:#fafcff;font-size:14px;min-height:45px;height:45px;padding:6px 10px;line-height:1.4}
+.run-settings-panel .apply-row{margin-bottom:8px;gap:10px}
+.run-settings-panel #apply-run{background:#edf3ff;border-color:#aabddd;color:#24549d;font-weight:600}
+.control-status{margin:5px 0 0;min-height:15px;font-size:10px;color:var(--green)}
+.control-status.blocked{color:var(--amber)}
+.run-settings-panel .apply-row .form-note{margin:0;font-size:10px}
+.run-settings-panel .header-field{margin-bottom:0}
+.run-settings-panel .header-field .form-note{margin-top:4px;font-size:10px}
+.control-page .control-actions{gap:10px;margin-top:6px}
+.control-page .control-actions.two-actions{grid-template-columns:repeat(2,1fr)}
+.control-page .control-actions .button{padding:9px 10px;font-weight:650;font-size:14px;border-radius:6px}
+.control-page .start-button{background:#18814f;color:#fff;border-color:#18814f}
+.control-page .start-button:hover:not(:disabled){background:#11653d;color:#fff}
+.control-page .stop-button{background:#c43a40;color:#fff;border-color:#c43a40}
+.control-page .stop-button:hover:not(:disabled){background:#a52930;color:#fff}
+.control-page .nssta-button{background:#edf3ff;color:#2859b9;border-color:#aebfe7}
+.control-page .nssta-button:hover:not(:disabled){background:#deeaff;color:#204c99}
+.control-page .restart-button{background:#fff7e7;border-color:#d9b56a;color:#895909;font-weight:650;padding:10px 14px}
+.control-page .restart-button:hover:not(:disabled){background:#ffedc6;color:#704905}
+.control-page .button:disabled{opacity:.48}
+.control-page .restart-row{border-top:1px solid var(--line);margin-top:10px;padding-top:8px;align-items:center}
+.control-page .restart-row h3{font-size:12px}
+.control-page .restart-row p{font-size:10px;max-width:320px;margin-top:3px}
+.control-page .stat-grid{gap:12px;margin-bottom:18px}
+.control-page .stat-label{font-size:10px;margin-bottom:6px}
+.control-page .stat-value{font-size:25px}
+.control-page .detail-list{row-gap:10px;grid-template-columns:88px minmax(0,1fr)}
+.control-page .divider{margin:15px 0}
+.control-page #live-config{max-height:245px}
+.es-counters{display:flex;flex-wrap:wrap;gap:5px 12px;margin-top:12px;font-size:10px;max-height:65px;overflow:auto}
+.es-counter{display:inline-flex;align-items:center;gap:7px;border:1px solid #e3e7ef;border-radius:4px;padding:3px 7px;background:#fafbfd}
+.es-counter strong{font-variant-numeric:tabular-nums;color:#24549d}
+.daq-format{padding-top:8px;overflow:auto;font-size:11px}
+.daq-fields{display:grid;grid-template-columns:minmax(75px,auto) minmax(0,1fr);gap:5px 12px;margin:4px 0;align-items:start}
+.daq-fields>dt{color:var(--muted);font-size:10px;overflow-wrap:anywhere}
+.daq-fields>dd{margin:0;min-width:0;white-space:normal;overflow-wrap:anywhere}
+.daq-table th,.daq-table td{padding:5px 8px;font-size:10px;white-space:normal;overflow-wrap:anywhere}
+.run-expanded{padding:8px 0;max-height:420px;overflow:auto;font-size:11px}
+.run-expanded>.daq-fields{grid-template-columns:120px minmax(0,1fr)}
+.control-page .footer{display:none}
+@media(max-width:850px){.control-workspace{grid-template-columns:minmax(0,1fr);grid-template-areas:"settings" "overview" "operation" "connections"}.container.control-page{padding-top:18px}.operation-panel #operation-body{max-height:230px}}
+@media(max-width:550px){.control-page .page-head{gap:12px;align-items:flex-start}.control-page h1{font-size:21px}.control-page .page-head>.button{font-size:10px;padding:7px 8px}.control-page .field-row{grid-template-columns:minmax(0,1fr) 115px}.run-settings-panel .recall-field{display:block}.run-settings-panel .recall-field label{margin-bottom:5px}.control-page .stat-value{font-size:21px}.control-page .control-actions .button{font-size:13px;padding:12px 6px}.control-page .restart-row{gap:10px}.control-page .restart-button{padding:10px;font-size:11px}.connection-address{font-size:11px}}
+
+#top-connections{gap:6px;flex-wrap:wrap}.topbar{height:auto;min-height:58px;gap:12px;padding-top:12px;padding-bottom:12px}.top-right{gap:10px;flex-wrap:wrap}@media(max-width:700px){.topbar{flex-wrap:wrap}}
+
+.compact-control .topbar{height:auto}
+
+.es-status-connected{color:#15803d;font-weight:600}.es-status-disconnected{color:#c2410c;font-weight:600}.es-status-unknown{color:#b45309}.es-summary-actions{display:flex;align-items:center;gap:6px}
+
+.control-workspace{grid-template-areas:none}.control-column{display:flex;flex-direction:column;gap:10px;min-width:0}.control-column>.panel{grid-area:auto}@media(max-width:850px){.control-workspace{display:flex;flex-direction:column}.control-column{width:100%}}

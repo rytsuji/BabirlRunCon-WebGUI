@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <title>Babirl Web Controller</title>
+  <link rel="stylesheet" href="/static/style.css?v=v1-20261104-release-review-2">
+  <link rel="stylesheet" href="/static/control.css?v=v1-20261104-release-review-2">
+  <link rel="stylesheet" href="/static/webutil.css?v=v1-20261104-release-review-2">
+  <script src="/static/control-state.js?v=v1-20261104-release-review-2" defer></script>
+  <script src="/static/run-format.js?v=v1-20261104-release-review-2" defer></script>
+  <script src="/static/webutil.js?v=v1-20261104-release-review-2" defer></script>
+  <script src="/static/app.js?v=v1-20261104-release-review-2" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <span class="brand">Babirl Web Controller</span>
+    <div class="top-right"><div id="top-connections" class="actions" hidden></div><a class="button small" href="/">Experiment list</a><span class="top-version">V1</span></div>
+  </header>
+  <main id="app" class="container"><p class="muted">Loading experiments…</p></main>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <dialog id="confirm-dialog">
+    <form method="dialog">
+      <h2 id="confirm-title">Confirm operation</h2><p id="confirm-message"></p>
+      <div class="actions end"><button value="cancel" class="button">Cancel</button><button value="confirm" class="button primary" id="confirm-button">Confirm</button></div>
+    </form>
+  </dialog>
+</body>
+</html>
