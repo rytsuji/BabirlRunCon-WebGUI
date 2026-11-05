@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261105-editor-9";
+const GUI_BUILD = "v1-20261105-layout-10";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -94,6 +94,8 @@ async function route() {
   pageCleanup();pageCleanup=()=>{};
   clearTimeout(timer);
   $("#top-connections").hidden=true;
+  $("#top-experiment").hidden=true;$("#top-experiment").replaceChildren();
+  $("#top-edit-config").hidden=true;$("#top-edit-config").removeAttribute("href");
   const version = ++routeVersion;
   app.classList.remove("control-page","config-editor");
   document.body.classList.remove("compact-control");
@@ -176,8 +178,11 @@ async function controlPage(eid, config, version, revision) {
   let draftDirty = false, headerDirty = false, pending = false, historyError = "", refreshRequested = true, loadedHistoryVersion = null, connectionsRequested = true;
   app.classList.add("control-page");
   document.body.classList.add("compact-control");
+  $("#top-experiment").innerHTML=`<h1>${html(config.experiment.name)}</h1><p>${html(config.experiment.description)}</p>`;
+  $("#top-experiment").hidden=false;
+  $("#top-edit-config").href=`/experiments/${encodeURIComponent(eid)}/edit`;
+  $("#top-edit-config").hidden=false;
   app.innerHTML = `
-    <div class="page-head compact-head"><div><h1>${html(config.experiment.name)}</h1><p class="subtitle">${html(config.experiment.description)}</p></div><a class="button" href="/experiments/${encodeURIComponent(eid)}/edit">⚙ Edit configuration</a></div>
     <nav class="tabs" role="tablist" aria-label="Control modules"><button class="tab active" id="tab-control" role="tab" aria-selected="true" aria-controls="view-control">Run Control</button><button class="tab" id="tab-history" role="tab" aria-selected="false" aria-controls="view-history">Run History</button></nav>
     <div id="connection-warning" class="section" hidden></div>
     <div id="control-errors" class="notice red section" role="alert" hidden></div>
@@ -519,14 +524,14 @@ async function controlPage(eid, config, version, revision) {
 async function editorPage(eid, data, version) {
   let config = structuredClone(data.config), revision = data.revision, editorMode = "form", metadataUnlocked = false;
   app.classList.add("config-editor");
-  let savedConfig=structuredClone(config), savedYaml=data.yaml;
+  let savedConfig=structuredClone(config), savedYaml=data.yaml, savedOnce=false;
   const experimentURL=new URL(data.experiment_path || `/experiments/${encodeURIComponent(eid)}`,location.origin).href;
   app.innerHTML = `${crumbs(config.experiment, "Configuration")}<div class="page-head"><div><div class="eyebrow">EXPERIMENT CONFIGURATION</div><h1>Edit configuration</h1><p class="subtitle">${html(config.experiment.name)} </p></div><a class="button" href="/experiments/${encodeURIComponent(eid)}">← Back to control</a></div>
     <div class="panel panel-body section"><div class="field"><label>Experiment URL</label><a class="mono wrap" href="${html(experimentURL)}" target="_blank" rel="noopener">${html(experimentURL)}</a><p class="form-note">Configured GUI port: ${html(data.server_port ?? location.port)}</p></div></div><div class="editor-layout"><aside class="editor-aside"><h3>Configuration</h3><p>Experiment</p><p>Event Builder</p><p>Run Control API</p><p>API hooks</p><div class="divider"></div><p>Saved to:</p><p class="mono">config/<br>experiment.yaml</p><p>Saving does not contact DAQ. Active operations and unfinished Run records must be resolved first. A backup is kept on save.</p></aside>
     <div class="editor-content"><div class="actions" style="justify-content:space-between"><button class="button small" id="metadata-lock" type="button">🔒 Unlock Experiment details</button><div class="editor-switch"><button id="mode-form" class="active" type="button">Form</button><button id="mode-yaml" type="button">YAML</button></div></div>
     <div id="editor-form"></div><div id="editor-yaml" class="field" hidden><label for="yaml-source">experiment.yaml</label><textarea id="yaml-source" class="yaml-editor" spellcheck="false"></textarea></div>
     <section class="panel section"><div class="panel-head"><h2>Configuration history</h2><button class="button small" id="reload-edits">Reload history</button></div><div id="config-edits" class="panel-body"></div></section>
-    <div class="field section"><label for="edit-comment">History comment (optional)</label><input id="edit-comment" maxlength="1000" placeholder="Describe this configuration change"></div><div class="editor-toolbar"><span class="small-text muted" id="save-state">No unsaved changes</span><div class="actions"><a class="button" href="/experiments/${encodeURIComponent(eid)}">Cancel &amp; back to control</a><button id="discard-config" class="button danger" type="button" hidden>Discard changes</button><button id="save-config" class="button primary">Save</button></div></div></div></div>${footer()}`;
+    <div class="field section"><label for="edit-comment">History comment (optional)</label><input id="edit-comment" maxlength="1000" placeholder="Describe this configuration change"></div><div class="editor-toolbar"><span class="small-text muted" id="save-state">No unsaved changes</span><div class="actions"><a id="editor-back" class="button" href="/experiments/${encodeURIComponent(eid)}">Cancel &amp; Back to control</a><button id="discard-config" class="button danger" type="button" hidden>Discard changes</button><button id="save-config" class="button primary">Save</button></div></div></div></div>${footer()}`;
   $("#yaml-source").value = data.yaml;
   async function loadEdits(){
     const edits=await api(`/api/experiments/${encodeURIComponent(eid)}/config-history`);
@@ -632,14 +637,20 @@ async function editorPage(eid, data, version) {
     $("#edit-id").disabled=!metadataUnlocked;$("#edit-name").disabled=!metadataUnlocked;$("#edit-description").disabled=!metadataUnlocked;
   };
   $("#edit-comment").addEventListener("input",markDirty);
-  function markDirty() { dirtyEditor = true; $("#save-state").textContent = "Unsaved changes"; $("#discard-config").hidden=false; }
+  function markDirty() { dirtyEditor = true; $("#save-state").textContent = "Unsaved changes"; $("#discard-config").hidden=false; $("#editor-back").textContent="Cancel & Back to control"; }
+  function markClean(message) {
+    dirtyEditor=false;$("#discard-config").hidden=true;$("#save-state").textContent=message;
+    $("#editor-back").textContent=savedOnce ? "Back to control" : "Cancel & Back to control";
+  }
+  function noChanges() {
+    savedOnce=true;markClean("No changes to save");toast("No changes to save.");
+  }
   $("#discard-config").onclick=()=>{
     config=structuredClone(savedConfig);
     $("#yaml-source").value=savedYaml;
     $("#edit-comment").value="";
     renderForm();
-    dirtyEditor=false;$("#discard-config").hidden=true;
-    $("#save-state").textContent="No unsaved changes";
+    markClean("No unsaved changes");
   };
   renderForm(); $("#yaml-source").addEventListener("input", markDirty);
   $("#mode-yaml").onclick = async () => {
@@ -662,15 +673,19 @@ async function editorPage(eid, data, version) {
     } catch (error) { toast(error.message,true); }
   };
   $("#save-config").onclick = async () => {
+    if(!dirtyEditor){noChanges();return;}
     const button = $("#save-config"); button.disabled = true;
     const controls=[...app.querySelectorAll("input,textarea,select,button")].filter(el=>el!==button && !el.disabled);controls.forEach(el=>el.disabled=true);
     try {
       let raw = $("#yaml-source").value;
       if (editorMode === "form") { collectForm(); raw = (await api("/api/config/serialize",{method:"POST",body:config})).yaml; }
       const parsed=await api("/api/config/parse",{method:"POST",body:{yaml:raw}});
+      if(JSON.stringify(parsed)===JSON.stringify(savedConfig) && (editorMode==="form" || raw===savedYaml)){
+        noChanges();return;
+      }
       const result = await api(`/api/experiments/${encodeURIComponent(eid)}/config`,{method:"PUT",body:{yaml:raw,revision,comment:$("#edit-comment").value,allow_metadata_edit:metadataUnlocked}});
       revision = result.revision; config=parsed;savedConfig=structuredClone(parsed);savedYaml=raw;
-      $("#yaml-source").value=raw;$("#edit-comment").value=""; dirtyEditor = false; $("#save-state").textContent = "Saved";$("#discard-config").hidden=true;
+      $("#yaml-source").value=raw;$("#edit-comment").value="";savedOnce=true;markClean("Saved");
       toast("Configuration saved");
       if(result.experiment_id && result.experiment_id!==eid){await navigate(`/experiments/${encodeURIComponent(result.experiment_id)}/edit`,true);return;}
       await loadEdits();

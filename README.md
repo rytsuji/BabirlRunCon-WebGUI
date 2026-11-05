@@ -1,4 +1,4 @@
-# Babirl Web Controller
+# Babirl Runcon GUI
 
 Requires Python 3.9 or later.
 
