@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261105-display-7";
+const GUI_BUILD = "v1-20261105-monitor-8";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -7,6 +7,9 @@ const html = escapeHTML;
 const app = $("#app");
 let mode = "http";
 let routeVersion = 0;
+let pageCleanup=()=>{};
+window.addEventListener('pagehide',()=>pageCleanup());
+window.addEventListener('pageshow',event=>{if(event.persisted)route();});
 let timer = null;
 let dirtyEditor = false;
 let toastTimer;
@@ -88,6 +91,7 @@ window.addEventListener("beforeunload", event => {
 });
 
 async function route() {
+  pageCleanup();pageCleanup=()=>{};
   clearTimeout(timer);
   $("#top-connections").hidden=true;
   const version = ++routeVersion;
@@ -100,7 +104,7 @@ async function route() {
       const data = await api(`/api/experiments/${encodeURIComponent(eid)}/config`);
       if (version !== routeVersion) return;
       if (parts[2] === "edit") await editorPage(eid, data, version);
-      else await controlPage(eid, data.config, version);
+      else await controlPage(eid, data.config, version, data.revision);
     } else if (new URLSearchParams(location.search).has("new")) newExperimentPage();
     else await indexPage(version);
   } catch (error) {
@@ -163,7 +167,7 @@ function newExperimentPage() {
   };
 }
 
-async function controlPage(eid, config, version) {
+async function controlPage(eid, config, version, revision) {
   const base = `/api/experiments/${encodeURIComponent(eid)}`;
   let historyMode = "saved", restartOverride=false;
   let stopWaitStarted=null, stopWaitTicker=null, stopWaitId=null;
@@ -209,6 +213,11 @@ async function controlPage(eid, config, version) {
     workspace.appendChild(column);
   }
 
+  let monitorRevision=revision;
+  const monitors=mountMonitors({workspace,base,items:config.monitor_api,revision,isLive:()=>version===routeVersion});
+  function monitorContext(){monitors.context(selectedModule==='control' && !document.hidden,current?.connected && !current.active_operation ? current.state.state : 'unknown');}
+  document.addEventListener('visibilitychange',monitorContext);
+  pageCleanup=()=>{monitors.destroy();document.removeEventListener('visibilitychange',monitorContext);};
   const utilities = mountWebutil({eid,config,isLive:()=>version===routeVersion,getState:()=>current,
     onMutate:()=>{refreshRequested=true;poll();},
     checkConnections:async()=>{
@@ -216,6 +225,7 @@ async function controlPage(eid, config, version) {
       refreshRequested=true;poll();return result;
     }});
   let selectedModule = "control";
+  monitorContext();
   function selectTab(name, focus = false) {
     const returningToControl = name === "control" && selectedModule !== "control";
     selectedModule = name;
@@ -228,6 +238,7 @@ async function controlPage(eid, config, version) {
       if (selected && focus) button.focus();
     }
     utilities.activate(name);
+    monitorContext();
     if(returningToControl) { connectionsRequested=true; refreshRequested=true; poll(); }
   }
   for (const name of utilities.ids) {
@@ -254,7 +265,7 @@ async function controlPage(eid, config, version) {
   function controls() {
     const availability = daqControlState({status:current ? {...current,restart_unlocked:restartOverride || current.restart_unlocked} : {restart_unlocked:restartOverride},pending,draftDirty,
       header:$("#run-header").value,runname:$("#run-name").value,
-      runnumber:$("#run-number").value,restartConfigured:!!config.restart_api.length || ["babinfo","babild","babissm","babian"].some(name=>config.babimo?.[name])});
+      runnumber:$("#run-number").value,restartConfigured:config.restart_api.some(hook=>hook.enabled!==false) || ["babinfo","babild","babissm","babian"].some(name=>config.babimo?.[name])});
     $("#header-bytes").textContent = availability.bytes;
     for (const [id,reason] of [["start",availability.startReason],["nssta",availability.startReason],
       ["stop",availability.stopReason],["apply-run",availability.setReason],["restart",availability.restartReason]]) {
@@ -385,7 +396,13 @@ async function controlPage(eid, config, version) {
         }
       }
       if (version !== routeVersion) return;
-      current = status; restartOverride=!!status.restart_unlocked; historyData = hist;
+      if(status.config_revision && status.config_revision!==monitorRevision){
+        monitors.stop();
+        const latest=await api(base+'/config');
+        if(version!==routeVersion)return;
+        monitorRevision=latest.revision;monitors.configure(latest.config.monitor_api,monitorRevision);
+      }
+      current = status; monitorContext(); restartOverride=!!status.restart_unlocked; historyData = hist;
       const waiting=status.active_operation;
       if(waiting?.wait_started_at){
         clearTimeout(stopWaitTicker);
@@ -450,7 +467,7 @@ async function controlPage(eid, config, version) {
       warning.hidden = true;
       if (!status.connected || status.eb_owner || state.target?.allow_writes === false) {
         warning.hidden = false;
-        const canRecover=!status.eb_owner && !status.active_operation && !["running","nssta"].includes(state.state) && state.target?.allow_writes!==false && (!!config.restart_api.length || ["babinfo","babild","babissm","babian"].some(name=>config.babimo?.[name]));
+        const canRecover=!status.eb_owner && !status.active_operation && !["running","nssta"].includes(state.state) && state.target?.allow_writes!==false && (config.restart_api.some(hook=>hook.enabled!==false) || ["babinfo","babild","babissm","babian"].some(name=>config.babimo?.[name]));
         const message=status.eb_owner ? `This EB is in use by experiment ${status.eb_owner}.` : state.target?.allow_writes===false ? "The Run Control API has writes disabled. Enable daq.allow_writes on the API server." : !status.connected ? "DAQ cannot be controlled because the connection is unavailable. Try restarting DAQ?" : "";
         warning.innerHTML=`<div class="notice ${!status.connected ? "red" : "amber"}" style="margin:0"><p>${html(message)}</p>${canRecover ? '<div class="actions"><button class="button small" id="recover-daq">Yes, restart DAQ</button></div>' : ''}</div>`;
         if($("#recover-daq"))$("#recover-daq").onclick=()=>{if(!$("#restart").disabled)$("#restart").click();};
@@ -482,7 +499,7 @@ async function controlPage(eid, config, version) {
       renderOperation(status.active_operation || hist.operations[0]); controls(); utilities.updateStatus(status);
     } catch (error) {
       if (version !== routeVersion) return;
-      current = null; controls(); utilities.updateStatus(null);
+      current = null; monitorContext(); controls(); utilities.updateStatus(null);
       $("#connection").innerHTML = pill("UNKNOWN", "red");
       $("#api-connection").innerHTML = pill("UNKNOWN", "red");
       $("#top-connections").hidden=false;
@@ -540,15 +557,15 @@ async function editorPage(eid, data, version) {
     $("#editor-form").innerHTML = `<div class="editor-content">
       <section class="panel"><div class="panel-head"><h2>Experiment</h2><span class="small-text muted">Name / Description</span></div><div class="panel-body">${field("Experiment URL path (ID)","edit-id",config.experiment.id,'maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,63}"')}<p class="form-note">/experiments/&lt;ID&gt; · Letters, numbers, hyphens and underscores. Changing this moves the existing settings and history to the new URL.</p>${field("Name","edit-name",config.experiment.name,'maxlength="200"')}<div class="field"><label for="edit-description">Description</label><textarea id="edit-description">${html(config.experiment.description)}</textarea></div></div></section>
       <section class="panel"><div class="panel-head"><h2>Event Builder</h2></div><div class="panel-body"><div class="two-columns">${field("Name","edit-eb-name",config.eb.name)}${field("Host","edit-eb-host",config.eb.host)}</div></div></section>
-      <section class="panel"><div class="panel-head"><h2>Run Control API</h2></div><div class="panel-body">${field("Name","edit-api-name",config.run_control_api.name)}${field("Base URL","edit-api-url",config.run_control_api.api,'type="url"')}${field("Event polling interval (seconds)","edit-event-interval",config.run_control_api.event_poll_interval_sec ?? 2,'type="number" min="1" max="3600" step="0.5"')}${field("Start timeout (seconds)","edit-start-timeout",config.run_control_api.start_timeout ?? 10,'type="number" min="1" max="3600"')}${field("Stop timeout (seconds)","edit-stop-timeout",config.run_control_api.stop_timeout ?? 10,'type="number" min="1" max="3600"')}${field("Enable Restart DAQ after (seconds)","edit-restart-delay",config.run_control_api.restart_enable_after_sec ?? 5,'type="number" min="1" max="3600"')}${field("Idle connection check interval (seconds) · fixed at 2","edit-idle-interval",2,'type="number" disabled')}<p class="form-note">Start/Stop timeout defines when a timeout error appears. Restart enable delay starts when a Stop error or timeout occurs. Existing Start/Run errors start the delay at the Stop click. No commands are resent. Idle checks are read-only.</p>${field("Token environment variable (optional)","edit-api-token",config.run_control_api.token_env || "",'placeholder="BABIRL_API_TOKEN"')}<p class="form-note">Tokens stay on the backend. Enter an environment variable name, not the token.</p><div class="section"><label class="check-label"><input type="checkbox" id="edit-nssta" ${config.run_control_api.enable_nssta ? "checked" : ""}>Enable NSSTA (non-saving acquisition)</label></div></div></section>
+      <section class="panel"><div class="panel-head"><h2>Run Control API</h2></div><div class="panel-body"><label class="check-label"><input type="checkbox" id="edit-api-enabled" ${config.run_control_api.enabled!==false ? 'checked' : ''}>Enabled</label>${field("Name","edit-api-name",config.run_control_api.name)}${field("Base URL","edit-api-url",config.run_control_api.api,'type="url"')}${field("Event polling interval (seconds)","edit-event-interval",config.run_control_api.event_poll_interval_sec ?? 2,'type="number" min="1" max="3600" step="0.5"')}${field("Start timeout (seconds)","edit-start-timeout",config.run_control_api.start_timeout ?? 10,'type="number" min="1" max="3600"')}${field("Stop timeout (seconds)","edit-stop-timeout",config.run_control_api.stop_timeout ?? 10,'type="number" min="1" max="3600"')}${field("Enable Restart DAQ after (seconds)","edit-restart-delay",config.run_control_api.restart_enable_after_sec ?? 5,'type="number" min="1" max="3600"')}${field("Idle connection check interval (seconds) · fixed at 2","edit-idle-interval",2,'type="number" disabled')}<p class="form-note">Start/Stop timeout defines when a timeout error appears. Restart enable delay starts when a Stop error or timeout occurs. Existing Start/Run errors start the delay at the Stop click. No commands are resent. Idle checks are read-only.</p>${field("Token environment variable (optional)","edit-api-token",config.run_control_api.token_env || "",'placeholder="BABIRL_API_TOKEN"')}<p class="form-note">Tokens stay on the backend. Enter an environment variable name, not the token.</p><div class="section"><label class="check-label"><input type="checkbox" id="edit-nssta" ${config.run_control_api.enable_nssta ? "checked" : ""}>Enable NSSTA (non-saving acquisition)</label></div></div></section>
       <section class="panel"><div class="panel-head"><h2>babimo · Restart DAQ</h2></div><div class="panel-body"><p class="form-note">Restart selected processes on the EB host via babimo. Saved per experiment. New experiments select babinfo and babild. babinfo and babild are stopped together; babinfo starts before babild.</p>${field("EB fragment number for offline recovery (optional)","edit-babimo-efn",config.babimo?.efn ?? "",'type="number" min="0" max="255" placeholder="Use the actual EB fragment number"')}<div class="babimo-options section">${["babinfo","babild","babissm","babian"].map(name=>`<label class="check-label"><input id="babimo-${name}" type="checkbox" ${config.babimo?.[name] ? "checked" : ""}>${name}</label>`).join("")}</div></div></section>
-      ${["start","stop","restart"].map(type => `<section class="panel"><div class="panel-head"><h2>${{start:"Pre-run APIs",stop:"Post-run APIs",restart:"Restart APIs"}[type]}</h2><button class="button small" data-add="${type}" type="button">＋ Add API</button></div><div class="panel-body" id="hooks-${type}">${renderHooks(type)}</div></section>`).join("")}</div>`;
+      ${["start","stop","restart","monitor"].map(type => `<section class="panel"><div class="panel-head"><h2>${{start:"Pre-run APIs",stop:"Post-run APIs",restart:"Restart APIs",monitor:"Monitor APIs"}[type]}</h2><button class="button small" data-add="${type}" type="button">＋ Add API</button></div><div class="panel-body" id="hooks-${type}">${renderHooks(type)}</div></section>`).join("")}</div>`;
     $("#edit-id").disabled=!metadataUnlocked;$("#edit-name").disabled=!metadataUnlocked;
     $("#edit-description").disabled=!metadataUnlocked;
     $("#editor-form").querySelectorAll("input,textarea").forEach(el => el.addEventListener("input", markDirty));
     $("#editor-form").querySelectorAll("[data-add]").forEach(button => button.onclick = () => {
       collectForm(); const key = button.dataset.add+"_api";
-      config[key].push({name:"",api:"",...(button.dataset.add === "restart" ? {} : {run_on_nssta:false})});
+      config[key].push({name:"",api:"",enabled:true,...(['restart','monitor'].includes(button.dataset.add) ? {} : {run_on_nssta:false}),...(button.dataset.add==='monitor' ? {interval_sec:5,timeout_sec:10,timing:'always'} : {})});
       markDirty(); renderForm();
     });
     $("#editor-form").querySelectorAll("[data-remove]").forEach(button => button.onclick = () => {
@@ -574,11 +591,15 @@ async function editorPage(eid, data, version) {
   }
   function renderHooks(type) {
     return config[type+"_api"].map((hook,index,array) => `<div class="hook-row" data-hook="${type}">
-      <div class="two-columns">${field("Name",`hook-${type}-${index}-name`,hook.name)}${field("URL · full POST endpoint",`hook-${type}-${index}-api`,hook.api,'type="url"')}</div>
+      <div class="two-columns">${field("Name",`hook-${type}-${index}-name`,hook.name)}${field("URL · full endpoint",`hook-${type}-${index}-api`,hook.api,'type="url"')}</div>
+      <label class="check-label"><input type="checkbox" id="hook-${type}-${index}-enabled" ${hook.enabled!==false ? 'checked' : ''}>Enabled</label>
       ${field("Token environment variable (optional)",`hook-${type}-${index}-token`,hook.token_env || "")}
-      ${type==='restart' ? '' : renderQueryParams(type,index,hook)}
-      <div class="hook-row-actions">${type !== "restart" ? `<label class="check-label"><input type="checkbox" id="hook-${type}-${index}-nssta" ${hook.run_on_nssta ? "checked" : ""}>Also run for NSSTA</label>` : `<span class="small-text muted">Runs while DAQ is idle</span>`}
+      ${type==='monitor' ? renderMonitorFields(index,hook) : type==='restart' ? '' : renderQueryParams(type,index,hook)}
+      <div class="hook-row-actions">${!['restart','monitor'].includes(type) ? `<label class="check-label"><input type="checkbox" id="hook-${type}-${index}-nssta" ${hook.run_on_nssta ? "checked" : ""}>Also run for NSSTA</label>` : `<span class="small-text muted">${type==='monitor' ? 'Scheduled GET · display only' : 'Runs while DAQ is idle'}</span>`}
       <div class="hook-order"><span>${index+1}</span><button class="button small" type="button" title="Move up" data-kind="${type}" data-index="${index}" data-move="-1" ${index === 0 ? "disabled" : ""}>↑</button><button class="button small" type="button" title="Move down" data-kind="${type}" data-index="${index}" data-move="1" ${index === array.length-1 ? "disabled" : ""}>↓</button><button class="button small" type="button" data-kind="${type}" data-remove="${index}" title="Remove API">×</button></div></div></div>`).join("") || `<p class="small-text muted" style="margin:0">No APIs configured. This step will be skipped.</p>`;
+  }
+  function renderMonitorFields(index,hook){
+    return `<div class="two-columns">${field('Polling interval (seconds)',`monitor-${index}-interval`,hook.interval_sec ?? 5,'type="number" min="1" max="3600"')}${field('Timeout (seconds)',`monitor-${index}-timeout`,hook.timeout_sec ?? 10,'type="number" min="1" max="3600"')}</div><label>Timing<select class="input" id="monitor-${index}-timing">${Object.entries({always:'Every time',running:'During running',idle:'During IDLE'}).map(([key,label])=>`<option value="${key}" ${(hook.timing || 'always')===key ? 'selected' : ''}>${label}</option>`).join('')}</select></label><p class="form-note">GET · JSON · Display only. Failures never change DAQ state.</p>`;
   }
   function collectForm() {
     config.experiment.id = $("#edit-id").value.trim();
@@ -587,16 +608,17 @@ async function editorPage(eid, data, version) {
     config.babimo = Object.fromEntries(["babinfo","babild","babissm","babian"].map(name=>[name,$("#babimo-"+name).checked]));
     config.babimo.efn=$("#edit-babimo-efn").value==="" ? null : Number($("#edit-babimo-efn").value);
     config.eb = {name:$("#edit-eb-name").value,host:$("#edit-eb-host").value};
-    config.run_control_api = {name:$("#edit-api-name").value,api:$("#edit-api-url").value,enable_nssta:$("#edit-nssta").checked,event_poll_interval_sec:Number($("#edit-event-interval").value),start_timeout:Number($("#edit-start-timeout").value),stop_timeout:Number($("#edit-stop-timeout").value),restart_enable_after_sec:Number($("#edit-restart-delay").value),idle_connection_interval_sec:Number($("#edit-idle-interval").value)};
+    config.run_control_api = {enabled:$('#edit-api-enabled').checked,name:$("#edit-api-name").value,api:$("#edit-api-url").value,enable_nssta:$("#edit-nssta").checked,event_poll_interval_sec:Number($("#edit-event-interval").value),start_timeout:Number($("#edit-start-timeout").value),stop_timeout:Number($("#edit-stop-timeout").value),restart_enable_after_sec:Number($("#edit-restart-delay").value),idle_connection_interval_sec:Number($("#edit-idle-interval").value)};
     if ($("#edit-api-token").value.trim()) config.run_control_api.token_env = $("#edit-api-token").value.trim();
-    for (const type of ["start","stop","restart"]) config[type+"_api"] = config[type+"_api"].map((_,index) => {
-      const hook = {name:$(`#hook-${type}-${index}-name`).value,api:$(`#hook-${type}-${index}-api`).value};
-      if (type !== "restart") hook.run_on_nssta = $(`#hook-${type}-${index}-nssta`).checked;
-      if(type!=='restart'){
+    for (const type of ["start","stop","restart","monitor"]) config[type+"_api"] = config[type+"_api"].map((_,index) => {
+      const hook = {name:$(`#hook-${type}-${index}-name`).value,api:$(`#hook-${type}-${index}-api`).value,enabled:$(`#hook-${type}-${index}-enabled`).checked};
+      if (!['restart','monitor'].includes(type)) hook.run_on_nssta = $(`#hook-${type}-${index}-nssta`).checked;
+      if(!['restart','monitor'].includes(type)){
         hook.send_query_params=$(`#hook-${type}-${index}-query-enabled`).checked;
         hook.argument_transport=$(`#hook-${type}-${index}-argument-transport`).value;
         hook.query_params=(_.query_params || []).map((argument,n)=>({name:$(`#hook-${type}-${index}-arg-${n}-name`).value.trim(),source:$(`#hook-${type}-${index}-arg-${n}-source`).value}));
       }
+      if(type==='monitor'){hook.interval_sec=Number($(`#monitor-${index}-interval`).value);hook.timeout_sec=Number($(`#monitor-${index}-timeout`).value);hook.timing=$(`#monitor-${index}-timing`).value;}
       const token = $(`#hook-${type}-${index}-token`).value.trim(); if (token) hook.token_env = token;
       return hook;
     });

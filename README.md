@@ -31,8 +31,12 @@ Run **babirl-runcon-api** separately to control babirl.
 
 In the Web GUI, create an experiment and enter its Event Builder host and
 Run Control API base URL, for example `http://<API-server-IP>:5000`.
-These settings and additional Start/Stop/Restart APIs can also be registered
+These settings and additional Start/Stop/Restart/Monitor APIs can also be registered
 and edited through **Edit configuration**.
+
+Monitor APIs use GET and update their latest result only while the Run Control
+tab is visible. Configure their interval, timeout and timing in Edit configuration.
+Uncheck Enabled to keep an API configuration without executing it.
 
 If the API requires a token, set its environment variable before starting the
 GUI and enter that variable name in the API settings.

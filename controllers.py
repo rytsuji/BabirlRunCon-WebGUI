@@ -165,6 +165,8 @@ class HttpController:
 
 
 def auth_headers(endpoint, default_env=None):
+    if not endpoint.enabled:
+        raise RuntimeError('API is disabled in Edit configuration.')
     env_name = endpoint.token_env or default_env
     token = os.environ.get(env_name, "") if env_name else ""
     if endpoint.token_env and not token:

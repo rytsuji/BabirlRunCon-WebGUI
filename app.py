@@ -16,12 +16,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import Field, field_validator, model_validator
 
 from controllers import HttpController
+from monitor_api import read_monitor
 from models import Babimo, Experiment, ExperimentConfig, RunControlEndpoint, ServerConfig, Strict
 from monitor import Monitor
 from service import ControlService
 from storage import Store, now
 
-BUILD_ID = "v1-20261105-display-7"
+BUILD_ID = "v1-20261105-monitor-8"
 BASE = Path(__file__).resolve().parent
 
 
@@ -98,10 +99,11 @@ class ProcessAction(Strict):
     allow_running: bool = False
 
 
-def create_app(settings=None, experiments_dir=None, controller=None, http_client=None):
+def create_app(settings=None, experiments_dir=None, controller=None, http_client=None, monitor_http_client=None):
     settings = settings or ServerConfig()
     store = Store(experiments_dir or BASE / settings.experiments_dir)
     client = http_client or httpx.AsyncClient(timeout=settings.request_timeout_sec, follow_redirects=False)
+    monitor_client=monitor_http_client or httpx.AsyncClient(timeout=10,follow_redirects=False)
     adapter = controller or HttpController(client)
     service = ControlService(store, adapter, client, settings)
     monitor = Monitor(adapter)
@@ -114,6 +116,8 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
         await service.close()
         if http_client is None:
             await client.aclose()
+        if monitor_http_client is None:
+            await monitor_client.aclose()
 
     app = FastAPI(title="DAQ Run Control", lifespan=lifespan)
     app.state.store = store
@@ -289,7 +293,7 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
 
     @app.get("/api/experiments/{eid}/status")
     async def status(eid: str, refresh: bool = False):
-        config, _, _ = config_for(eid)
+        config, _, config_revision = config_for(eid)
         active=service.active.get(service.key(config))
         if active and (active.get('wait_started_at') or active['action']=='restart'):
             observed=copy.deepcopy(monitor.cache.get(eid,{'state':{'state':'unknown'},'connected':False}))
@@ -298,6 +302,7 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
         else:
             observed = await monitor.read(eid, config, refresh)
         return {**observed,
+                'config_revision':config_revision,
                 "history_version": store.history_version(eid),
                 "checked_at": now(), "active_operation": service.active.get(service.key(config)),
                 "active_run": bool(store.active_run(eid)), "eb_owner": owner_of_eb(eid, config),
@@ -398,7 +403,7 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
             raise HTTPException(409, "This EB is owned by another active experiment.")
         if request.action == "nssta" and not config.run_control_api.enable_nssta:
             raise HTTPException(403, "NSSTA is disabled for this experiment.")
-        if request.action == "restart" and not config.restart_api and not config.babimo.selected():
+        if request.action == "restart" and not any(h.enabled for h in config.restart_api) and not config.babimo.selected():
             raise HTTPException(409, "No Restart API is configured.")
         if request.action in ("start", "nssta") and store.active_run(eid):
             raise HTTPException(409, "An unresolved Run exists. Use Stop or Restart DAQ to recover.")
@@ -446,6 +451,19 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
     async def stop_recovery(eid:str):
         config,_,_=config_for(eid)
         return {'stop_recovery':service.stop_recovery(eid,config),'restart_unlocked':service.restart_unlocked(eid,config)}
+
+    @app.get('/api/experiments/{eid}/monitors/{index}')
+    async def monitor_read(eid:str,index:int,revision:str,request:Request):
+        config,_,current_revision=config_for(eid)
+        if revision!=current_revision:raise HTTPException(409,'Monitor configuration changed')
+        if not 0<=index<len(config.monitor_api):raise HTTPException(404,'Monitor not found')
+        endpoint=config.monitor_api[index]
+        if not endpoint.enabled:raise HTTPException(409,'Monitor is disabled')
+        try:result=await read_monitor(monitor_client,endpoint,request)
+        except asyncio.CancelledError:
+            return JSONResponse({'status':'fail','message':'Monitor request cancelled'},status_code=499)
+        if config_for(eid)[2]!=revision:raise HTTPException(409,'Monitor configuration changed')
+        return {**result,'revision':revision}
 
     app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 

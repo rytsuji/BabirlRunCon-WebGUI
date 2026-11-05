@@ -147,6 +147,7 @@ class ControlService:
 
     async def hooks(self, eid, config, op, hooks, nssta=False):
         for hook in hooks:
+            if not hook.enabled:continue
             if nssta and not hook.run_on_nssta:
                 continue
 
@@ -340,6 +341,7 @@ class ControlService:
                             restart_errors.append(str(exc) or type(exc).__name__)
                     # Restart hooks are unconditional and do not carry run_on_nssta.
                     for hook in config.restart_api:
+                        if not hook.enabled:continue
                         try:
                             await self.check_restart(eid, config,op.get('force_restart',False))
                             await self.hooks(eid, config, op, [hook])

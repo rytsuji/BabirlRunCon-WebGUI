@@ -23,6 +23,7 @@ class Endpoint(Strict):
     name: str = Field(min_length=1)
     api: str
     token_env: Optional[str] = None
+    enabled: bool = True
 
     @field_validator("api")
     @classmethod
@@ -60,6 +61,12 @@ class Hook(Endpoint):
         return self
 
 
+class MonitorEndpoint(Endpoint):
+    interval_sec: float = Field(default=5,ge=1,le=3600)
+    timeout_sec: float = Field(default=10,ge=1,le=3600)
+    timing: Literal['always','running','idle'] = 'always'
+
+
 class Babimo(Strict):
     efn: Optional[int] = Field(default=None,ge=0,le=255,strict=True)
     babinfo: bool = False
@@ -78,9 +85,10 @@ class ExperimentConfig(Strict):
     restart_api: list[Endpoint] = Field(default_factory=list, max_length=100)
     start_api: list[Hook] = Field(default_factory=list, max_length=100)
     stop_api: list[Hook] = Field(default_factory=list, max_length=100)
+    monitor_api: list[MonitorEndpoint] = Field(default_factory=list,max_length=100)
     babimo: Babimo = Field(default_factory=Babimo)
 
-    @field_validator("restart_api", "start_api", "stop_api", mode="before")
+    @field_validator("restart_api", "start_api", "stop_api", "monitor_api", mode="before")
     @classmethod
     def empty_hooks(cls, value):
         # A YAML key with only comments is null, not an empty list.
