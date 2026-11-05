@@ -96,5 +96,6 @@
 .compact-control .topbar{height:auto}
 
 .es-status-connected{color:#15803d;font-weight:600}.es-status-disconnected{color:#c2410c;font-weight:600}.es-status-unknown{color:#b45309}.es-summary-actions{display:flex;align-items:center;gap:6px}
+.es-mode{display:inline-block;padding:0 4px;border:1px solid #cbd5e1;border-radius:3px;background:#f1f5f9;color:#334155;font-size:9px;font-weight:600;white-space:nowrap}
 
 .control-workspace{grid-template-areas:none}.control-column{display:flex;flex-direction:column;gap:10px;min-width:0}.control-column>.panel{grid-area:auto}@media(max-width:850px){.control-workspace{display:flex;flex-direction:column}.control-column{width:100%}}

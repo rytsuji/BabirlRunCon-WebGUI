@@ -66,7 +66,17 @@ function formatConfigChanges(current,previous,kind,currentES,previousES) {
   const keys=[...new Set([...Object.keys(now),...Object.keys(old)])];
   const changed=name=>JSON.stringify(now[name])!==JSON.stringify(old[name]);
   const display=(values,name)=>Object.prototype.hasOwnProperty.call(values,name) ? formatDAQ(values[name],name.split(' / ').pop()) : '<span class="muted">Not present</span>';
-  return `<p class="small-text">${keys.filter(changed).length} changed fields · highlighted</p><div class="config-diff-wrap"><table class="config-diff"><thead><tr><th>Field</th><th>Current</th><th>Previous</th></tr></thead><tbody>${keys.map(name=>`<tr class="${changed(name) ? 'config-changed' : ''}"><th>${escapeRunHTML(name.replace(/_/g,' '))}</th><td>${display(now,name)}</td><td>${display(old,name)}</td></tr>`).join('')}</tbody></table></div>`;
+  const groups=new Map();
+  keys.forEach(name=>{
+    const group=['eflist','hdlist'].includes(kind) ? name.match(/^(?:ES|Disk) \d+/)?.[0] || 'List' : '';
+    if(!groups.has(group))groups.set(group,[]);
+    groups.get(group).push(name);
+  });
+  const rows=[...groups].map(([group,names])=>{
+    const heading=group ? `<tr class="config-group"><th colspan="3" scope="rowgroup">${escapeRunHTML(group.replace(/^ES /,'EF ').replace(/^Disk /,'HD '))}<span>${names.filter(changed).length} changed fields</span></th></tr>` : '';
+    return `<tbody>`+heading+names.map(name=>`<tr class="${changed(name) ? 'config-changed' : ''}"><th scope="row">${escapeRunHTML((group && name.startsWith(group+' / ') ? name.slice(group.length+3) : name).replace(/_/g,' '))}</th><td>${display(now,name)}</td><td>${display(old,name)}</td></tr>`).join('')+`</tbody>`;
+  }).join('');
+  return `<p class="small-text">${keys.filter(changed).length} changed fields · highlighted</p><div class="config-diff-wrap"><table class="config-diff"><thead><tr><th>Field</th><th>Current</th><th>Previous</th></tr></thead>${rows}</table></div>`;
 }
 
 if (typeof module !== "undefined") module.exports = {runNumber,formatDAQ,runSummary,runDownload,formatESCounters,formatConfigChanges};
