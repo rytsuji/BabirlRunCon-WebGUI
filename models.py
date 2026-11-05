@@ -23,7 +23,6 @@ class Endpoint(Strict):
     name: str = Field(min_length=1)
     api: str
     token_env: Optional[str] = None
-    enabled: bool = True
 
     @field_validator("api")
     @classmethod
@@ -36,6 +35,14 @@ class Endpoint(Strict):
 
 
 class RunControlEndpoint(Endpoint):
+    @model_validator(mode='before')
+    @classmethod
+    def ignore_legacy_enabled(cls, value):
+        if isinstance(value, dict):
+            value = dict(value)
+            value.pop('enabled', None)
+        return value
+
     enable_nssta: bool = False
     event_poll_interval_sec: float = Field(default=2, ge=1, le=3600)
     start_timeout: float = Field(default=10, ge=1, le=3600)
@@ -48,7 +55,11 @@ class QueryArgument(Strict):
     name: str = Field(pattern=r'^[A-Za-z_][A-Za-z0-9_]{0,63}$')
     source: Literal['runname','runnumber','header','event_num','start_time','stop_time','state','getconfig_json','run_history_json','current_run_json']
 
-class Hook(Endpoint):
+class EnabledEndpoint(Endpoint):
+    enabled: bool = True
+
+
+class Hook(EnabledEndpoint):
     run_on_nssta: bool = False
     send_query_params: bool = False
     argument_transport: Literal['query','json'] = 'query'
@@ -61,7 +72,17 @@ class Hook(Endpoint):
         return self
 
 
-class MonitorEndpoint(Endpoint):
+class MonitorEndpoint(EnabledEndpoint):
+    send_query_params: bool = False
+    query_params: list[QueryArgument] = Field(default_factory=list, max_length=32)
+
+    @model_validator(mode='after')
+    def unique_query_names(self):
+        names = [item.name for item in self.query_params]
+        if len(names) != len(set(names)):
+            raise ValueError('Query argument names must be unique within an API')
+        return self
+
     interval_sec: float = Field(default=5,ge=1,le=3600)
     timeout_sec: float = Field(default=10,ge=1,le=3600)
     timing: Literal['always','running','idle'] = 'always'
@@ -82,7 +103,7 @@ class ExperimentConfig(Strict):
     experiment: Experiment
     eb: EB
     run_control_api: RunControlEndpoint
-    restart_api: list[Endpoint] = Field(default_factory=list, max_length=100)
+    restart_api: list[EnabledEndpoint] = Field(default_factory=list, max_length=100)
     start_api: list[Hook] = Field(default_factory=list, max_length=100)
     stop_api: list[Hook] = Field(default_factory=list, max_length=100)
     monitor_api: list[MonitorEndpoint] = Field(default_factory=list,max_length=100)

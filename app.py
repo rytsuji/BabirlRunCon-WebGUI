@@ -22,7 +22,7 @@ from monitor import Monitor
 from service import ControlService
 from storage import Store, now
 
-BUILD_ID = "v1-20261105-monitor-8"
+BUILD_ID = "v1-20261105-editor-9"
 BASE = Path(__file__).resolve().parent
 
 
@@ -459,7 +459,8 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
         if not 0<=index<len(config.monitor_api):raise HTTPException(404,'Monitor not found')
         endpoint=config.monitor_api[index]
         if not endpoint.enabled:raise HTTPException(409,'Monitor is disabled')
-        try:result=await read_monitor(monitor_client,endpoint,request)
+        try:result=await read_monitor(monitor_client,endpoint,request,
+                                     state=monitor.cache.get(eid,{}).get('state'),store=store,eid=eid)
         except asyncio.CancelledError:
             return JSONResponse({'status':'fail','message':'Monitor request cancelled'},status_code=499)
         if config_for(eid)[2]!=revision:raise HTTPException(409,'Monitor configuration changed')

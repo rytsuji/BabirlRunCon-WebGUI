@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261105-monitor-8";
+const GUI_BUILD = "v1-20261105-editor-9";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -95,7 +95,7 @@ async function route() {
   clearTimeout(timer);
   $("#top-connections").hidden=true;
   const version = ++routeVersion;
-  app.classList.remove("control-page");
+  app.classList.remove("control-page","config-editor");
   document.body.classList.remove("compact-control");
   try {
     const parts = location.pathname.split("/").filter(Boolean);
@@ -518,13 +518,15 @@ async function controlPage(eid, config, version, revision) {
 
 async function editorPage(eid, data, version) {
   let config = structuredClone(data.config), revision = data.revision, editorMode = "form", metadataUnlocked = false;
+  app.classList.add("config-editor");
+  let savedConfig=structuredClone(config), savedYaml=data.yaml;
   const experimentURL=new URL(data.experiment_path || `/experiments/${encodeURIComponent(eid)}`,location.origin).href;
   app.innerHTML = `${crumbs(config.experiment, "Configuration")}<div class="page-head"><div><div class="eyebrow">EXPERIMENT CONFIGURATION</div><h1>Edit configuration</h1><p class="subtitle">${html(config.experiment.name)} </p></div><a class="button" href="/experiments/${encodeURIComponent(eid)}">← Back to control</a></div>
     <div class="panel panel-body section"><div class="field"><label>Experiment URL</label><a class="mono wrap" href="${html(experimentURL)}" target="_blank" rel="noopener">${html(experimentURL)}</a><p class="form-note">Configured GUI port: ${html(data.server_port ?? location.port)}</p></div></div><div class="editor-layout"><aside class="editor-aside"><h3>Configuration</h3><p>Experiment</p><p>Event Builder</p><p>Run Control API</p><p>API hooks</p><div class="divider"></div><p>Saved to:</p><p class="mono">config/<br>experiment.yaml</p><p>Saving does not contact DAQ. Active operations and unfinished Run records must be resolved first. A backup is kept on save.</p></aside>
     <div class="editor-content"><div class="actions" style="justify-content:space-between"><button class="button small" id="metadata-lock" type="button">🔒 Unlock Experiment details</button><div class="editor-switch"><button id="mode-form" class="active" type="button">Form</button><button id="mode-yaml" type="button">YAML</button></div></div>
     <div id="editor-form"></div><div id="editor-yaml" class="field" hidden><label for="yaml-source">experiment.yaml</label><textarea id="yaml-source" class="yaml-editor" spellcheck="false"></textarea></div>
     <section class="panel section"><div class="panel-head"><h2>Configuration history</h2><button class="button small" id="reload-edits">Reload history</button></div><div id="config-edits" class="panel-body"></div></section>
-    <div class="field section"><label for="edit-comment">History comment (optional)</label><input id="edit-comment" maxlength="1000" placeholder="Describe this configuration change"></div><div class="editor-toolbar"><span class="small-text muted" id="save-state">No unsaved changes</span><div class="actions"><a class="button" href="/experiments/${encodeURIComponent(eid)}">Cancel</a><button id="save-config" class="button primary">Save configuration</button></div></div></div></div>${footer()}`;
+    <div class="field section"><label for="edit-comment">History comment (optional)</label><input id="edit-comment" maxlength="1000" placeholder="Describe this configuration change"></div><div class="editor-toolbar"><span class="small-text muted" id="save-state">No unsaved changes</span><div class="actions"><a class="button" href="/experiments/${encodeURIComponent(eid)}">Cancel &amp; back to control</a><button id="discard-config" class="button danger" type="button" hidden>Discard changes</button><button id="save-config" class="button primary">Save</button></div></div></div></div>${footer()}`;
   $("#yaml-source").value = data.yaml;
   async function loadEdits(){
     const edits=await api(`/api/experiments/${encodeURIComponent(eid)}/config-history`);
@@ -557,12 +559,12 @@ async function editorPage(eid, data, version) {
     $("#editor-form").innerHTML = `<div class="editor-content">
       <section class="panel"><div class="panel-head"><h2>Experiment</h2><span class="small-text muted">Name / Description</span></div><div class="panel-body">${field("Experiment URL path (ID)","edit-id",config.experiment.id,'maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,63}"')}<p class="form-note">/experiments/&lt;ID&gt; · Letters, numbers, hyphens and underscores. Changing this moves the existing settings and history to the new URL.</p>${field("Name","edit-name",config.experiment.name,'maxlength="200"')}<div class="field"><label for="edit-description">Description</label><textarea id="edit-description">${html(config.experiment.description)}</textarea></div></div></section>
       <section class="panel"><div class="panel-head"><h2>Event Builder</h2></div><div class="panel-body"><div class="two-columns">${field("Name","edit-eb-name",config.eb.name)}${field("Host","edit-eb-host",config.eb.host)}</div></div></section>
-      <section class="panel"><div class="panel-head"><h2>Run Control API</h2></div><div class="panel-body"><label class="check-label"><input type="checkbox" id="edit-api-enabled" ${config.run_control_api.enabled!==false ? 'checked' : ''}>Enabled</label>${field("Name","edit-api-name",config.run_control_api.name)}${field("Base URL","edit-api-url",config.run_control_api.api,'type="url"')}${field("Event polling interval (seconds)","edit-event-interval",config.run_control_api.event_poll_interval_sec ?? 2,'type="number" min="1" max="3600" step="0.5"')}${field("Start timeout (seconds)","edit-start-timeout",config.run_control_api.start_timeout ?? 10,'type="number" min="1" max="3600"')}${field("Stop timeout (seconds)","edit-stop-timeout",config.run_control_api.stop_timeout ?? 10,'type="number" min="1" max="3600"')}${field("Enable Restart DAQ after (seconds)","edit-restart-delay",config.run_control_api.restart_enable_after_sec ?? 5,'type="number" min="1" max="3600"')}${field("Idle connection check interval (seconds) · fixed at 2","edit-idle-interval",2,'type="number" disabled')}<p class="form-note">Start/Stop timeout defines when a timeout error appears. Restart enable delay starts when a Stop error or timeout occurs. Existing Start/Run errors start the delay at the Stop click. No commands are resent. Idle checks are read-only.</p>${field("Token environment variable (optional)","edit-api-token",config.run_control_api.token_env || "",'placeholder="BABIRL_API_TOKEN"')}<p class="form-note">Tokens stay on the backend. Enter an environment variable name, not the token.</p><div class="section"><label class="check-label"><input type="checkbox" id="edit-nssta" ${config.run_control_api.enable_nssta ? "checked" : ""}>Enable NSSTA (non-saving acquisition)</label></div></div></section>
+      <section class="panel"><div class="panel-head"><h2>Run Control API</h2></div><div class="panel-body config-api-fields">${field("Name","edit-api-name",config.run_control_api.name)}${field("Base URL","edit-api-url",config.run_control_api.api,'type="url"')}${field("Event polling interval (seconds)","edit-event-interval",config.run_control_api.event_poll_interval_sec ?? 2,'type="number" min="1" max="3600" step="0.5"')}${field("Start timeout (seconds)","edit-start-timeout",config.run_control_api.start_timeout ?? 10,'type="number" min="1" max="3600"')}${field("Stop timeout (seconds)","edit-stop-timeout",config.run_control_api.stop_timeout ?? 10,'type="number" min="1" max="3600"')}${field("Enable Restart DAQ after (seconds)","edit-restart-delay",config.run_control_api.restart_enable_after_sec ?? 5,'type="number" min="1" max="3600"')}${field("Idle connection check interval (seconds) · fixed at 2","edit-idle-interval",2,'type="number" disabled')}<p class="form-note">Start/Stop timeout defines when a timeout error appears. Restart enable delay starts when a Stop error or timeout occurs. Existing Start/Run errors start the delay at the Stop click. No commands are resent. Idle checks are read-only.</p>${field("Token environment variable (optional)","edit-api-token",config.run_control_api.token_env || "",'placeholder="BABIRL_API_TOKEN"')}<p class="form-note">Tokens stay on the backend. Enter an environment variable name, not the token.</p><div class="section"><label class="check-label"><input type="checkbox" id="edit-nssta" ${config.run_control_api.enable_nssta ? "checked" : ""}>Enable NSSTA (non-saving acquisition)</label></div></div></section>
       <section class="panel"><div class="panel-head"><h2>babimo · Restart DAQ</h2></div><div class="panel-body"><p class="form-note">Restart selected processes on the EB host via babimo. Saved per experiment. New experiments select babinfo and babild. babinfo and babild are stopped together; babinfo starts before babild.</p>${field("EB fragment number for offline recovery (optional)","edit-babimo-efn",config.babimo?.efn ?? "",'type="number" min="0" max="255" placeholder="Use the actual EB fragment number"')}<div class="babimo-options section">${["babinfo","babild","babissm","babian"].map(name=>`<label class="check-label"><input id="babimo-${name}" type="checkbox" ${config.babimo?.[name] ? "checked" : ""}>${name}</label>`).join("")}</div></div></section>
       ${["start","stop","restart","monitor"].map(type => `<section class="panel"><div class="panel-head"><h2>${{start:"Pre-run APIs",stop:"Post-run APIs",restart:"Restart APIs",monitor:"Monitor APIs"}[type]}</h2><button class="button small" data-add="${type}" type="button">＋ Add API</button></div><div class="panel-body" id="hooks-${type}">${renderHooks(type)}</div></section>`).join("")}</div>`;
     $("#edit-id").disabled=!metadataUnlocked;$("#edit-name").disabled=!metadataUnlocked;
     $("#edit-description").disabled=!metadataUnlocked;
-    $("#editor-form").querySelectorAll("input,textarea").forEach(el => el.addEventListener("input", markDirty));
+    $("#editor-form").querySelectorAll("input,textarea,select").forEach(el => {el.addEventListener("input", markDirty);el.addEventListener("change",markDirty);});
     $("#editor-form").querySelectorAll("[data-add]").forEach(button => button.onclick = () => {
       collectForm(); const key = button.dataset.add+"_api";
       config[key].push({name:"",api:"",enabled:true,...(['restart','monitor'].includes(button.dataset.add) ? {} : {run_on_nssta:false}),...(button.dataset.add==='monitor' ? {interval_sec:5,timeout_sec:10,timing:'always'} : {})});
@@ -587,14 +589,14 @@ async function editorPage(eid, data, version) {
   function renderQueryParams(type,index,hook){
     const prefix=`hook-${type}-${index}`;
     const sources={runname:'Run name',runnumber:'Current Run number',header:'Header',event_num:'Event count',start_time:'Start time (babirl)',stop_time:'Stop time (babirl)',state:'DAQ state',getconfig_json:'getconfig (JSON)',current_run_json:'Current Run record (JSON)',run_history_json:'Run history: latest 50 (JSON)'};
-    return `<div class="section"><label class="check-label"><input type="checkbox" id="${prefix}-query-enabled" data-query-toggle ${hook.send_query_params ? 'checked' : ''}>Send DAQ arguments</label><div ${hook.send_query_params ? '' : 'hidden'}><label>Send as<select class="input" id="${prefix}-argument-transport"><option value="query" ${hook.argument_transport!=='json' ? 'selected' : ''}>Query parameters</option><option value="json" ${hook.argument_transport==='json' ? 'selected' : ''}>JSON body</option></select></label><p class="form-note">Values are read immediately before this API runs. Run number is the current DAQ value, without padding. Use JSON body for getconfig and history objects.</p>${(hook.query_params || []).map((argument,n)=>`<div class="actions section"><label>Argument name<input class="input" id="${prefix}-arg-${n}-name" maxlength="64" value="${html(argument.name)}" placeholder="run_number"></label><label>DAQ value<select class="input" id="${prefix}-arg-${n}-source">${Object.entries(sources).map(([key,label])=>`<option value="${key}" ${argument.source===key ? 'selected' : ''}>${label}</option>`).join('')}</select></label><button type="button" class="button small" data-query-remove="${n}" data-kind="${type}" data-index="${index}">×</button></div>`).join('')}<button type="button" class="button small section" data-query-add data-kind="${type}" data-index="${index}">＋ Add argument</button></div></div>`;
+    return `<div class="section"><label class="check-label"><input type="checkbox" id="${prefix}-query-enabled" data-query-toggle ${hook.send_query_params ? 'checked' : ''}>Send DAQ arguments</label><div ${hook.send_query_params ? '' : 'hidden'}><label>Send as<select class="input" id="${prefix}-argument-transport"><option value="query" ${hook.argument_transport!=='json' ? 'selected' : ''}>Query parameters</option>${type==='monitor' ? '' : `<option value="json" ${hook.argument_transport==='json' ? 'selected' : ''}>JSON body</option>`}</select></label><p class="form-note">${type==='monitor' ? 'GET query parameters use the latest cached DAQ values. JSON objects are sent as JSON strings. No additional DAQ requests are made.' : 'Values are read immediately before this API runs. Run number is the current DAQ value, without padding. Use JSON body for getconfig and history objects.'}</p>${(hook.query_params || []).map((argument,n)=>`<div class="actions section"><label>Argument name<input class="input" id="${prefix}-arg-${n}-name" maxlength="64" value="${html(argument.name)}" placeholder="run_number"></label><label>DAQ value<select class="input" id="${prefix}-arg-${n}-source">${Object.entries(sources).map(([key,label])=>`<option value="${key}" ${argument.source===key ? 'selected' : ''}>${label}</option>`).join('')}</select></label><button type="button" class="button small" data-query-remove="${n}" data-kind="${type}" data-index="${index}">×</button></div>`).join('')}<button type="button" class="button small section" data-query-add data-kind="${type}" data-index="${index}">＋ Add argument</button></div></div>`;
   }
   function renderHooks(type) {
     return config[type+"_api"].map((hook,index,array) => `<div class="hook-row" data-hook="${type}">
       <div class="two-columns">${field("Name",`hook-${type}-${index}-name`,hook.name)}${field("URL · full endpoint",`hook-${type}-${index}-api`,hook.api,'type="url"')}</div>
       <label class="check-label"><input type="checkbox" id="hook-${type}-${index}-enabled" ${hook.enabled!==false ? 'checked' : ''}>Enabled</label>
       ${field("Token environment variable (optional)",`hook-${type}-${index}-token`,hook.token_env || "")}
-      ${type==='monitor' ? renderMonitorFields(index,hook) : type==='restart' ? '' : renderQueryParams(type,index,hook)}
+      ${type==='monitor' ? renderMonitorFields(index,hook)+renderQueryParams(type,index,hook) : type==='restart' ? '' : renderQueryParams(type,index,hook)}
       <div class="hook-row-actions">${!['restart','monitor'].includes(type) ? `<label class="check-label"><input type="checkbox" id="hook-${type}-${index}-nssta" ${hook.run_on_nssta ? "checked" : ""}>Also run for NSSTA</label>` : `<span class="small-text muted">${type==='monitor' ? 'Scheduled GET · display only' : 'Runs while DAQ is idle'}</span>`}
       <div class="hook-order"><span>${index+1}</span><button class="button small" type="button" title="Move up" data-kind="${type}" data-index="${index}" data-move="-1" ${index === 0 ? "disabled" : ""}>↑</button><button class="button small" type="button" title="Move down" data-kind="${type}" data-index="${index}" data-move="1" ${index === array.length-1 ? "disabled" : ""}>↓</button><button class="button small" type="button" data-kind="${type}" data-remove="${index}" title="Remove API">×</button></div></div></div>`).join("") || `<p class="small-text muted" style="margin:0">No APIs configured. This step will be skipped.</p>`;
   }
@@ -608,14 +610,14 @@ async function editorPage(eid, data, version) {
     config.babimo = Object.fromEntries(["babinfo","babild","babissm","babian"].map(name=>[name,$("#babimo-"+name).checked]));
     config.babimo.efn=$("#edit-babimo-efn").value==="" ? null : Number($("#edit-babimo-efn").value);
     config.eb = {name:$("#edit-eb-name").value,host:$("#edit-eb-host").value};
-    config.run_control_api = {enabled:$('#edit-api-enabled').checked,name:$("#edit-api-name").value,api:$("#edit-api-url").value,enable_nssta:$("#edit-nssta").checked,event_poll_interval_sec:Number($("#edit-event-interval").value),start_timeout:Number($("#edit-start-timeout").value),stop_timeout:Number($("#edit-stop-timeout").value),restart_enable_after_sec:Number($("#edit-restart-delay").value),idle_connection_interval_sec:Number($("#edit-idle-interval").value)};
+    config.run_control_api = {name:$("#edit-api-name").value,api:$("#edit-api-url").value,enable_nssta:$("#edit-nssta").checked,event_poll_interval_sec:Number($("#edit-event-interval").value),start_timeout:Number($("#edit-start-timeout").value),stop_timeout:Number($("#edit-stop-timeout").value),restart_enable_after_sec:Number($("#edit-restart-delay").value),idle_connection_interval_sec:Number($("#edit-idle-interval").value)};
     if ($("#edit-api-token").value.trim()) config.run_control_api.token_env = $("#edit-api-token").value.trim();
     for (const type of ["start","stop","restart","monitor"]) config[type+"_api"] = config[type+"_api"].map((_,index) => {
       const hook = {name:$(`#hook-${type}-${index}-name`).value,api:$(`#hook-${type}-${index}-api`).value,enabled:$(`#hook-${type}-${index}-enabled`).checked};
       if (!['restart','monitor'].includes(type)) hook.run_on_nssta = $(`#hook-${type}-${index}-nssta`).checked;
-      if(!['restart','monitor'].includes(type)){
+      if(type!=='restart'){
         hook.send_query_params=$(`#hook-${type}-${index}-query-enabled`).checked;
-        hook.argument_transport=$(`#hook-${type}-${index}-argument-transport`).value;
+        if(type!=='monitor') hook.argument_transport=$(`#hook-${type}-${index}-argument-transport`).value;
         hook.query_params=(_.query_params || []).map((argument,n)=>({name:$(`#hook-${type}-${index}-arg-${n}-name`).value.trim(),source:$(`#hook-${type}-${index}-arg-${n}-source`).value}));
       }
       if(type==='monitor'){hook.interval_sec=Number($(`#monitor-${index}-interval`).value);hook.timeout_sec=Number($(`#monitor-${index}-timeout`).value);hook.timing=$(`#monitor-${index}-timing`).value;}
@@ -630,7 +632,15 @@ async function editorPage(eid, data, version) {
     $("#edit-id").disabled=!metadataUnlocked;$("#edit-name").disabled=!metadataUnlocked;$("#edit-description").disabled=!metadataUnlocked;
   };
   $("#edit-comment").addEventListener("input",markDirty);
-  function markDirty() { dirtyEditor = true; $("#save-state").textContent = "Unsaved changes"; }
+  function markDirty() { dirtyEditor = true; $("#save-state").textContent = "Unsaved changes"; $("#discard-config").hidden=false; }
+  $("#discard-config").onclick=()=>{
+    config=structuredClone(savedConfig);
+    $("#yaml-source").value=savedYaml;
+    $("#edit-comment").value="";
+    renderForm();
+    dirtyEditor=false;$("#discard-config").hidden=true;
+    $("#save-state").textContent="No unsaved changes";
+  };
   renderForm(); $("#yaml-source").addEventListener("input", markDirty);
   $("#mode-yaml").onclick = async () => {
     if (editorMode === "yaml") return;
@@ -653,16 +663,19 @@ async function editorPage(eid, data, version) {
   };
   $("#save-config").onclick = async () => {
     const button = $("#save-config"); button.disabled = true;
+    const controls=[...app.querySelectorAll("input,textarea,select,button")].filter(el=>el!==button && !el.disabled);controls.forEach(el=>el.disabled=true);
     try {
       let raw = $("#yaml-source").value;
       if (editorMode === "form") { collectForm(); raw = (await api("/api/config/serialize",{method:"POST",body:config})).yaml; }
+      const parsed=await api("/api/config/parse",{method:"POST",body:{yaml:raw}});
       const result = await api(`/api/experiments/${encodeURIComponent(eid)}/config`,{method:"PUT",body:{yaml:raw,revision,comment:$("#edit-comment").value,allow_metadata_edit:metadataUnlocked}});
-      revision = result.revision; $("#edit-comment").value=""; dirtyEditor = false; $("#save-state").textContent = "Saved";
+      revision = result.revision; config=parsed;savedConfig=structuredClone(parsed);savedYaml=raw;
+      $("#yaml-source").value=raw;$("#edit-comment").value=""; dirtyEditor = false; $("#save-state").textContent = "Saved";$("#discard-config").hidden=true;
       toast("Configuration saved");
       if(result.experiment_id && result.experiment_id!==eid){await navigate(`/experiments/${encodeURIComponent(result.experiment_id)}/edit`,true);return;}
       await loadEdits();
     } catch (error) { toast(error.message,true); }
-    finally { button.disabled = false; }
+    finally { button.disabled = false; controls.forEach(el=>el.disabled=false); }
   };
 }
 

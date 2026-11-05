@@ -6,9 +6,24 @@ from controllers import auth_headers
 from storage import now
 
 
-async def read_monitor(client,endpoint,request):
+async def read_monitor(client,endpoint,request,state=None,store=None,eid=None):
     async def fetch():
-        async with client.stream('GET',endpoint.api,headers=auth_headers(endpoint),
+        params = {}
+        if endpoint.send_query_params:
+            for argument in endpoint.query_params:
+                if argument.source == 'run_history_json':
+                    value = [store.public_run(run) for run in store.runs(eid)]
+                elif argument.source == 'current_run_json':
+                    runs = store.runs(eid, limit=1)
+                    value = store.public_run(runs[0]) if runs else None
+                else:
+                    key = 'raw_config' if argument.source == 'getconfig_json' else argument.source
+                    value = (state or {}).get(key)
+                if value is None:
+                    raise ValueError(f'DAQ value is unavailable: {argument.source}')
+                params[argument.name] = json.dumps(value,ensure_ascii=False,separators=(',',':')) if isinstance(value,(dict,list)) else str(value)
+        url = httpx.URL(endpoint.api).copy_merge_params(params) if params else endpoint.api
+        async with client.stream('GET',url,headers=auth_headers(endpoint),
                                  timeout=endpoint.timeout_sec,follow_redirects=False) as response:
             body=bytearray()
             async for chunk in response.aiter_bytes():

@@ -5,3 +5,26 @@
 
 .topbar{gap:12px}.topbar .brand{min-width:0;line-height:1.25}.top-right{flex-shrink:0}
 @media(max-width:550px){.topbar .brand{font-size:14px}.top-right{gap:8px}.top-right .button{font-size:10px;padding:6px 8px}.top-right .top-version{font-size:11px}}
+
+/* Compact configuration editor. */
+.config-editor .page-head{margin-bottom:10px}
+.config-editor .editor-content{gap:10px}
+.config-editor .panel-head{padding:8px 12px}
+.config-editor .panel-body{padding:10px 12px}
+.config-editor .field{margin-bottom:8px}
+.config-editor .field:last-child{margin-bottom:0}
+.config-editor .section{margin-top:8px}
+.config-editor input:not([type=checkbox]),.config-editor select,.config-editor textarea:not(.yaml-editor){padding:6px 9px}
+.config-editor textarea:not(.yaml-editor){min-height:54px}
+.config-editor .two-columns{gap:10px}
+.config-editor .form-note{margin:4px 0 6px;font-size:11px}
+.config-editor .hook-row{padding:10px}
+.config-editor .editor-toolbar{bottom:0;padding:10px 12px;border-radius:6px;box-shadow:0 -2px 8px #0000000a;background:#fff;gap:10px;flex-wrap:wrap}
+.config-editor #discard-config{color:#b42318;background:#fff;border-color:#f2b8b5}
+.config-editor #discard-config[hidden]{display:none}
+.config-editor #save-config{min-width:76px}
+.config-editor .editor-aside p{margin:8px 0}
+
+.config-editor .config-api-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 12px}
+.config-editor .config-api-fields>.form-note,.config-editor .config-api-fields>.section{grid-column:1/-1}
+@media(max-width:600px){.config-editor .config-api-fields{grid-template-columns:minmax(0,1fr)}}

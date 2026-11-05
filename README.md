@@ -36,7 +36,10 @@ and edited through **Edit configuration**.
 
 Monitor APIs use GET and update their latest result only while the Run Control
 tab is visible. Configure their interval, timeout and timing in Edit configuration.
-Uncheck Enabled to keep an API configuration without executing it.
+Use Send DAQ arguments to pass cached DAQ values, getconfig or Run history as
+query parameters to a Monitor API. JSON objects are encoded as JSON strings.
+Uncheck Enabled to pause additional APIs while keeping their settings.
+The Run Control API is always enabled.
 
 If the API requires a token, set its environment variable before starting the
 GUI and enter that variable name in the API settings.
