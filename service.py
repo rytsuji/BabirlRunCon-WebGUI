@@ -334,11 +334,17 @@ class ControlService:
                 try:
                     await self.check_restart(eid, config,op.get('force_restart',False))
                     if config.babimo.selected() or op.get('force_restart'):
-                        await self.step(eid,op,'Restart selected babimo processes',lambda:self.controller.restart_daemons(eid,config,force_restart=op.get('force_restart',False),timeout_recovery=op.get('timeout_recovery',False),wait_timeout_sec=op.get('recovery_timeout_sec',30)))
+                        try:
+                            await self.step(eid,op,'Restart selected babimo processes',lambda:self.controller.restart_daemons(eid,config,force_restart=op.get('force_restart',False),timeout_recovery=op.get('timeout_recovery',False),wait_timeout_sec=op.get('recovery_timeout_sec',30)))
+                        except Exception as exc:
+                            restart_errors.append(str(exc) or type(exc).__name__)
                     # Restart hooks are unconditional and do not carry run_on_nssta.
                     for hook in config.restart_api:
-                        await self.check_restart(eid, config,op.get('force_restart',False))
-                        await self.hooks(eid, config, op, [hook])
+                        try:
+                            await self.check_restart(eid, config,op.get('force_restart',False))
+                            await self.hooks(eid, config, op, [hook])
+                        except Exception as exc:
+                            restart_errors.append(str(exc) or type(exc).__name__)
                 except Exception as exc:
                     restart_errors.append(str(exc) or type(exc).__name__)
                 await self.step(eid,op,'Wait 2 seconds before ES connect',lambda:asyncio.sleep(2))

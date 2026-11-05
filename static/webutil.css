@@ -39,3 +39,10 @@
 @media(max-width:700px){.es-inline .es-inline-grid{grid-template-columns:repeat(2,minmax(100px,1fr));}}
 
 .process-running{color:#15803d;font-weight:600}.process-stopped{color:#c2410c;font-weight:600}
+.config-diff-wrap{max-height:420px;overflow:auto;margin-top:8px}
+.config-diff{width:100%;table-layout:fixed;border-collapse:collapse;font-size:12px}
+.config-diff th,.config-diff td{padding:7px 9px;border:1px solid var(--line);text-align:left;vertical-align:top;overflow-wrap:anywhere;white-space:pre-wrap}
+.config-diff thead th{position:sticky;top:0;background:#f1f5f9}
+.config-diff th:first-child{width:28%}
+.config-diff .config-changed td{background:#fff5cf}
+.config-diff .config-changed td:nth-child(2){color:#14532d;font-weight:600;border-left:3px solid #d69e00}

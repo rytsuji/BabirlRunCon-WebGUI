@@ -52,4 +52,21 @@ function formatESCounters(counters, efInfo = []) {
   return items.map(item => `<span class="es-counter"><span class="muted">ES ${esc(item.efn ?? "—")}</span><span title="${esc(item.host || "")}">${esc(item.name || item.host || "—")}</span><strong>${item.evtn == null ? "—" : esc(Number(item.evtn).toLocaleString())}</strong></span>`).join("");
 }
 
-if (typeof module !== "undefined") module.exports = {runNumber,formatDAQ,runSummary,runDownload,formatESCounters};
+function formatConfigChanges(current,previous,kind,currentES,previousES) {
+  const key={eflist:'eflist',hdlist:'hdlist',ssm:'ssminfo'}[kind];
+  const select=(value,es)=>kind==='es' ? es : key ? value?.[key] : value;
+  function fields(value,path='',out={}) {
+    if(value && typeof value==='object' && Object.keys(value).length){
+      if(Array.isArray(value))value.forEach((item,index)=>fields(item,`${path}${item?.efn!=null ? 'ES '+item.efn : item?.hdn!=null ? 'Disk '+item.hdn : '['+index+']'}`,out));
+      else Object.entries(value).forEach(([name,item])=>fields(item,path ? path+' / '+name : name,out));
+    }else out[path || 'Value']=value;
+    return out;
+  }
+  const now=fields(select(current,currentES)),old=fields(select(previous,previousES));
+  const keys=[...new Set([...Object.keys(now),...Object.keys(old)])];
+  const changed=name=>JSON.stringify(now[name])!==JSON.stringify(old[name]);
+  const display=(values,name)=>Object.prototype.hasOwnProperty.call(values,name) ? formatDAQ(values[name],name.split(' / ').pop()) : '<span class="muted">Not present</span>';
+  return `<p class="small-text">${keys.filter(changed).length} changed fields · highlighted</p><div class="config-diff-wrap"><table class="config-diff"><thead><tr><th>Field</th><th>Current</th><th>Previous</th></tr></thead><tbody>${keys.map(name=>`<tr class="${changed(name) ? 'config-changed' : ''}"><th>${escapeRunHTML(name.replace(/_/g,' '))}</th><td>${display(now,name)}</td><td>${display(old,name)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+if (typeof module !== "undefined") module.exports = {runNumber,formatDAQ,runSummary,runDownload,formatESCounters,formatConfigChanges};

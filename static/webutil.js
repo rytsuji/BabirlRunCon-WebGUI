@@ -45,7 +45,7 @@ function mountWebutil(context) {
     if (["eflist","hdlist","ssm"].includes(kind)) await load(kind);
     toast("Settings written, verified and reloaded");
     const note = view(tab).querySelector(".utility-result");
-    if (note) note.innerHTML = `<details open><summary>Verified result · before / after</summary><div class="utility-readback">${formatDAQ(result)}</div></details>`;
+    if (note) note.innerHTML = `<details open><summary>Verified changes · Current / Previous</summary>${formatConfigChanges(result.after ?? result.es_config,result.before,kind,result.es_config,result.before_es)}</details>`;
     context.onMutate();
     return result;
   }
@@ -218,7 +218,7 @@ function mountWebutil(context) {
     try {
       if(name==="processes") {await loadProcesses();}
       else if(name==="raw") {if(!loaded.has(name))renderRaw();if(get("#raw-auto")?.checked)await readRaw();}
-      else if(!loaded.has(name)){view(name).innerHTML='<p class="muted">Reading DAQ configuration…</p>';await load(name);}
+      else {if(!loaded.has(name))view(name).innerHTML='<p class="muted">Reading DAQ configuration…</p>';await load(name);}
     } catch(error) {view(name).innerHTML=`<div class="notice red">${esc(error.message)}<p>Install the webutil API update, then open this tab again.</p></div>`;toast(error.message,true);}
   }
   return {ids,activate,updateStatus};

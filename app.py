@@ -21,7 +21,7 @@ from monitor import Monitor
 from service import ControlService
 from storage import Store, now
 
-BUILD_ID = "v1-20261105-reconnect-5"
+BUILD_ID = "v1-20261105-settings-6"
 BASE = Path(__file__).resolve().parent
 
 
