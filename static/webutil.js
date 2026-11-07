@@ -13,7 +13,7 @@ if(typeof module!=="undefined")module.exports={normalizeEFMode};
 function mountWebutil(context) {
   const esc = value => String(value ?? "").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const base = `/api/experiments/${encodeURIComponent(context.eid)}`;
-  const ids = ["control","raw","history","processes","eflist","hdlist","ssm"];
+  const ids = ["control","api","history","raw","processes","eflist","hdlist","ssm"];
   const names = {processes:"Process Manager",eflist:"EF List",ssm:"babissm",hdlist:"HD List",raw:"Raw Data"};
   let rawConfig = {}, tab = "control", rawTimer = null, status = null, rawBusy = false;
   const loaded = new Set();

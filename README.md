@@ -41,6 +41,17 @@ query parameters to a Monitor API. JSON objects are encoded as JSON strings.
 Uncheck Enabled to pause additional APIs while keeping their settings.
 The Run Control API is always enabled.
 
+Use **Copy** in the experiment list to reuse settings. Enter a new name and,
+optionally, a URL path (ID). The description starts blank; Run history is not copied.
+
+Register **Manual APIs** in Edit configuration, then run them from the **API** tab.
+Choose GET or POST, query parameters or a POST JSON body, and each argument's source.
+Choose availability with **Every time**, **During running** (including NSSTA), or
+**During IDLE**. The GUI and server check the DAQ state before execution.
+**Free input** creates an input in the API tab. Its template is a placeholder only;
+an empty input sends an empty string. The latest response appears to the right.
+Uncheck Enabled in the configuration to prevent an API from running.
+
 If the API requires a token, set its environment variable before starting the
 GUI and enter that variable name in the API settings.
 

@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261105-layout-10";
+const GUI_BUILD = "v1-20261107-api-11";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -107,7 +107,12 @@ async function route() {
       if (version !== routeVersion) return;
       if (parts[2] === "edit") await editorPage(eid, data, version);
       else await controlPage(eid, data.config, version, data.revision);
-    } else if (new URLSearchParams(location.search).has("new")) newExperimentPage();
+    } else if (new URLSearchParams(location.search).has("new")) {
+      const copyID=new URLSearchParams(location.search).get("copy");
+      const copy=copyID ? await api(`/api/experiments/${encodeURIComponent(copyID)}/config`) : null;
+      if(version!==routeVersion)return;
+      newExperimentPage(copy?.config);
+    }
     else await indexPage(version);
   } catch (error) {
     if (version !== routeVersion) return;
@@ -128,7 +133,7 @@ async function indexPage(version) {
         <div class="card-title"><h2>${html(exp.name)}</h2>${exp.error ? pill("CONFIG ERROR","red") : exp.active_operation ? pill("BUSY","blue") : pill("READY")}</div>
         <p class="card-description">${html(exp.error || exp.description || "No description provided.")}</p>
         <div class="card-footer"><span class="small-text muted">${html(exp.eb?.name || "—")} <span class="mono">${html(exp.eb?.host || "")}</span></span>
-        <div class="actions"><button class="button small" data-delete="${html(exp.id)}">Delete</button>${exp.error ? "" : `<a class="button text" href="/experiments/${encodeURIComponent(exp.id)}/edit">Edit config</a><a class="button" href="/experiments/${encodeURIComponent(exp.id)}">Open control <span>↗</span></a>`}</div></div>
+        <div class="actions">${exp.error ? "" : `<a class="button small" href="/?new=1&amp;copy=${encodeURIComponent(exp.id)}">Copy</a>`}<button class="button small" data-delete="${html(exp.id)}">Delete</button>${exp.error ? "" : `<a class="button text" href="/experiments/${encodeURIComponent(exp.id)}/edit">Edit config</a><a class="button" href="/experiments/${encodeURIComponent(exp.id)}">Open control <span>↗</span></a>`}</div></div>
       </article>`).join("") || `<div class="panel panel-body"><p class="muted">No experiments yet. Create your first experiment to get started.</p></div>`}</div>
     <div class="index-note"><span>ⓘ</span><span>Each experiment keeps its own configuration and database. Opening a control page does not change DAQ settings.</span></div>${footer()}`;
   app.querySelectorAll('[data-delete]').forEach(button=>button.onclick=async()=>{
@@ -144,8 +149,8 @@ async function indexPage(version) {
 
 }
 
-function newExperimentPage() {
-  app.innerHTML = `${crumbs({name:"New experiment",id:""})}<div class="page-head"><div><h1>New experiment</h1><p class="subtitle">Create an independent configuration and Run database.</p></div></div>
+function newExperimentPage(copyConfig=null) {
+  app.innerHTML = `${crumbs({name:"New experiment",id:""})}<div class="page-head"><div><h1>New experiment</h1><p class="subtitle">${copyConfig ? 'Copy settings into a new experiment. ID, name and description start blank; Run history is not copied.' : 'Create an independent configuration and Run database.'}</p></div></div>
     <form id="new-form" class="panel new-form"><div class="panel-body">
       <div class="field"><label for="new-id">Experiment URL path (ID)</label><input id="new-id" maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,63}" placeholder="physics_2026"><p class="form-note">${html(location.origin)}/experiments/&lt;ID&gt; · Leave blank to generate automatically. Use letters, numbers, hyphens and underscores.</p></div>
       <div class="field"><label for="new-name">Name</label><input id="new-name" required maxlength="200" placeholder="Experiment name"></div>
@@ -155,12 +160,16 @@ function newExperimentPage() {
       <div class="field"><label class="check-label"><input id="new-nssta" type="checkbox" checked>Enable NSSTA (non-saving acquisition)</label></div>
       <p class="form-note">Restart, pre-run and post-run API hooks can be added in the configuration editor.</p>
       </div><div class="panel-foot actions end"><a class="button" href="/">Cancel</a><button class="button primary" type="submit">Create experiment</button></div></form>${footer()}`;
+  if(copyConfig){
+    $("#new-eb").value=copyConfig.eb.name;$("#new-host").value=copyConfig.eb.host;
+    $("#new-api").value=copyConfig.run_control_api.api;$("#new-nssta").checked=copyConfig.run_control_api.enable_nssta;
+  }
   $("#new-form").onsubmit = async event => {
     event.preventDefault(); const button = $("button[type=submit]", event.target); button.disabled = true;
     try {
-      const config = {experiment:{name:$("#new-name").value.trim(),description:$("#new-description").value},
+      const config = {...(copyConfig ? structuredClone(copyConfig) : {}),experiment:{name:$("#new-name").value.trim(),description:$("#new-description").value},
         eb:{name:$("#new-eb").value.trim(),host:$("#new-host").value.trim()},
-        run_control_api:{name:$("#new-eb").value.trim(),api:$("#new-api").value.trim(),enable_nssta:$("#new-nssta").checked},restart_api:[],start_api:[],stop_api:[]};
+        run_control_api:{...(copyConfig?.run_control_api || {}),name:copyConfig?.run_control_api.name || $("#new-eb").value.trim(),api:$("#new-api").value.trim(),enable_nssta:$("#new-nssta").checked}};
       const id = $("#new-id").value.trim();
       if(id) config.experiment.id = id;
       const result = await api("/api/experiments", {method:"POST",body:config});
@@ -183,7 +192,7 @@ async function controlPage(eid, config, version, revision) {
   $("#top-edit-config").href=`/experiments/${encodeURIComponent(eid)}/edit`;
   $("#top-edit-config").hidden=false;
   app.innerHTML = `
-    <nav class="tabs" role="tablist" aria-label="Control modules"><button class="tab active" id="tab-control" role="tab" aria-selected="true" aria-controls="view-control">Run Control</button><button class="tab" id="tab-history" role="tab" aria-selected="false" aria-controls="view-history">Run History</button></nav>
+    <nav class="tabs" role="tablist" aria-label="Control modules"><button class="tab active" id="tab-control" role="tab" aria-selected="true" aria-controls="view-control">Run Control</button><button class="tab" id="tab-api" role="tab" aria-selected="false" aria-controls="view-api">API</button><button class="tab" id="tab-history" role="tab" aria-selected="false" aria-controls="view-history">Run History</button></nav>
     <div id="connection-warning" class="section" hidden></div>
     <div id="control-errors" class="notice red section" role="alert" hidden></div>
     <div id="view-control" role="tabpanel" aria-labelledby="tab-control" class="control-workspace">
@@ -209,6 +218,7 @@ async function controlPage(eid, config, version, revision) {
         <p id="acquisition-warning" class="form-note error-text" hidden></p>
       </div><div class="panel-foot small-text muted" id="last-checked">Values are read from the DAQ controller.</div></section>
     </div>
+    <section id="view-api" role="tabpanel" aria-labelledby="tab-api" class="section" hidden></section>
     <section id="view-history" role="tabpanel" aria-labelledby="tab-history" class="panel section" hidden><div class="panel-head"><h2>Run history</h2><label class="actions">Mode <select id="history-mode" class="input"><option value="saved" selected>Saved</option><option value="nssta">NSSTA</option><option value="all">All</option></select></label></div><p id="history-error" class="notice amber" hidden></p><div class="table-scroll"><table><thead><tr><th>Run</th><th>Mode</th><th>Header</th><th>Started</th><th>Status</th><th></th></tr></thead><tbody id="run-history"><tr><td colspan="6" class="empty-cell">No recorded Runs yet.</td></tr></tbody></table></div></section>${footer()}`;
 
   const workspace=$("#view-control");
@@ -229,6 +239,8 @@ async function controlPage(eid, config, version, revision) {
       const result=await api(base+"/connections/refresh",{method:"POST"});
       refreshRequested=true;poll();return result;
     }});
+  const manualAPIs=mountManualAPIs({base,items:config.manual_api || [],revision,getState:()=>current,isLive:()=>version===routeVersion});
+  const controlCleanup=pageCleanup;pageCleanup=()=>{manualAPIs.destroy();controlCleanup();};
   let selectedModule = "control";
   monitorContext();
   function selectTab(name, focus = false) {
@@ -243,6 +255,7 @@ async function controlPage(eid, config, version, revision) {
       if (selected && focus) button.focus();
     }
     utilities.activate(name);
+    manualAPIs.activate(name==="api");
     monitorContext();
     if(returningToControl) { connectionsRequested=true; refreshRequested=true; poll(); }
   }
@@ -407,7 +420,7 @@ async function controlPage(eid, config, version, revision) {
         if(version!==routeVersion)return;
         monitorRevision=latest.revision;monitors.configure(latest.config.monitor_api,monitorRevision);
       }
-      current = status; monitorContext(); restartOverride=!!status.restart_unlocked; historyData = hist;
+      current = status; manualAPIs.update(); monitorContext(); restartOverride=!!status.restart_unlocked; historyData = hist;
       const waiting=status.active_operation;
       if(waiting?.wait_started_at){
         clearTimeout(stopWaitTicker);
@@ -504,7 +517,7 @@ async function controlPage(eid, config, version, revision) {
       renderOperation(status.active_operation || hist.operations[0]); controls(); utilities.updateStatus(status);
     } catch (error) {
       if (version !== routeVersion) return;
-      current = null; monitorContext(); controls(); utilities.updateStatus(null);
+      current = null; manualAPIs.update(); monitorContext(); controls(); utilities.updateStatus(null);
       $("#connection").innerHTML = pill("UNKNOWN", "red");
       $("#api-connection").innerHTML = pill("UNKNOWN", "red");
       $("#top-connections").hidden=false;
@@ -566,13 +579,13 @@ async function editorPage(eid, data, version) {
       <section class="panel"><div class="panel-head"><h2>Event Builder</h2></div><div class="panel-body"><div class="two-columns">${field("Name","edit-eb-name",config.eb.name)}${field("Host","edit-eb-host",config.eb.host)}</div></div></section>
       <section class="panel"><div class="panel-head"><h2>Run Control API</h2></div><div class="panel-body config-api-fields">${field("Name","edit-api-name",config.run_control_api.name)}${field("Base URL","edit-api-url",config.run_control_api.api,'type="url"')}${field("Event polling interval (seconds)","edit-event-interval",config.run_control_api.event_poll_interval_sec ?? 2,'type="number" min="1" max="3600" step="0.5"')}${field("Start timeout (seconds)","edit-start-timeout",config.run_control_api.start_timeout ?? 10,'type="number" min="1" max="3600"')}${field("Stop timeout (seconds)","edit-stop-timeout",config.run_control_api.stop_timeout ?? 10,'type="number" min="1" max="3600"')}${field("Enable Restart DAQ after (seconds)","edit-restart-delay",config.run_control_api.restart_enable_after_sec ?? 5,'type="number" min="1" max="3600"')}${field("Idle connection check interval (seconds) · fixed at 2","edit-idle-interval",2,'type="number" disabled')}<p class="form-note">Start/Stop timeout defines when a timeout error appears. Restart enable delay starts when a Stop error or timeout occurs. Existing Start/Run errors start the delay at the Stop click. No commands are resent. Idle checks are read-only.</p>${field("Token environment variable (optional)","edit-api-token",config.run_control_api.token_env || "",'placeholder="BABIRL_API_TOKEN"')}<p class="form-note">Tokens stay on the backend. Enter an environment variable name, not the token.</p><div class="section"><label class="check-label"><input type="checkbox" id="edit-nssta" ${config.run_control_api.enable_nssta ? "checked" : ""}>Enable NSSTA (non-saving acquisition)</label></div></div></section>
       <section class="panel"><div class="panel-head"><h2>babimo · Restart DAQ</h2></div><div class="panel-body"><p class="form-note">Restart selected processes on the EB host via babimo. Saved per experiment. New experiments select babinfo and babild. babinfo and babild are stopped together; babinfo starts before babild.</p>${field("EB fragment number for offline recovery (optional)","edit-babimo-efn",config.babimo?.efn ?? "",'type="number" min="0" max="255" placeholder="Use the actual EB fragment number"')}<div class="babimo-options section">${["babinfo","babild","babissm","babian"].map(name=>`<label class="check-label"><input id="babimo-${name}" type="checkbox" ${config.babimo?.[name] ? "checked" : ""}>${name}</label>`).join("")}</div></div></section>
-      ${["start","stop","restart","monitor"].map(type => `<section class="panel"><div class="panel-head"><h2>${{start:"Pre-run APIs",stop:"Post-run APIs",restart:"Restart APIs",monitor:"Monitor APIs"}[type]}</h2><button class="button small" data-add="${type}" type="button">＋ Add API</button></div><div class="panel-body" id="hooks-${type}">${renderHooks(type)}</div></section>`).join("")}</div>`;
+      ${["start","stop","restart","monitor","manual"].map(type => `<section class="panel"><div class="panel-head"><h2>${{start:"Pre-run APIs",stop:"Post-run APIs",restart:"Restart APIs",monitor:"Monitor APIs",manual:"Manual APIs"}[type]}</h2><button class="button small" data-add="${type}" type="button">＋ Add API</button></div><div class="panel-body" id="hooks-${type}">${renderHooks(type)}</div></section>`).join("")}</div>`;
     $("#edit-id").disabled=!metadataUnlocked;$("#edit-name").disabled=!metadataUnlocked;
     $("#edit-description").disabled=!metadataUnlocked;
     $("#editor-form").querySelectorAll("input,textarea,select").forEach(el => {el.addEventListener("input", markDirty);el.addEventListener("change",markDirty);});
     $("#editor-form").querySelectorAll("[data-add]").forEach(button => button.onclick = () => {
       collectForm(); const key = button.dataset.add+"_api";
-      config[key].push({name:"",api:"",enabled:true,...(['restart','monitor'].includes(button.dataset.add) ? {} : {run_on_nssta:false}),...(button.dataset.add==='monitor' ? {interval_sec:5,timeout_sec:10,timing:'always'} : {})});
+      config[key].push({name:"",api:"",enabled:true,...(['restart','monitor','manual'].includes(button.dataset.add) ? {} : {run_on_nssta:false}),...(button.dataset.add==='monitor' ? {interval_sec:5,timeout_sec:10,timing:'always'} : {}),...(button.dataset.add==='manual' ? {method:'POST',timings:['always'],timeout_sec:10,send_query_params:true,argument_transport:'query',query_params:[]} : {})});
       markDirty(); renderForm();
     });
     $("#editor-form").querySelectorAll("[data-remove]").forEach(button => button.onclick = () => {
@@ -582,10 +595,19 @@ async function editorPage(eid, data, version) {
       collectForm(); const array = config[button.dataset.kind+"_api"], i = Number(button.dataset.index), j = i+Number(button.dataset.move);
       [array[i],array[j]] = [array[j],array[i]]; markDirty(); renderForm();
     });
+    $("#editor-form").querySelectorAll('[data-manual-timing]').forEach(checkbox=>checkbox.onchange=()=>{
+      const index=checkbox.dataset.index,key=checkbox.dataset.manualTiming;
+      if(key==='always' && checkbox.checked){
+        $(`#manual-${index}-timing-running`).checked=false;$(`#manual-${index}-timing-idle`).checked=false;
+      }else if(key!=='always' && checkbox.checked)$(`#manual-${index}-timing-always`).checked=false;
+      if(!['always','running','idle'].some(value=>$(`#manual-${index}-timing-${value}`).checked))$(`#manual-${index}-timing-always`).checked=true;
+      collectForm();markDirty();
+    });
+    $("#editor-form").querySelectorAll('[data-argument-source]').forEach(select=>select.onchange=()=>{collectForm();markDirty();renderForm();});
     $("#editor-form").querySelectorAll('[data-query-toggle]').forEach(checkbox=>checkbox.onchange=()=>{collectForm();markDirty();renderForm();});
     $("#editor-form").querySelectorAll('[data-query-add]').forEach(button=>button.onclick=()=>{
       collectForm();const hook=config[button.dataset.kind+'_api'][Number(button.dataset.index)];
-      hook.query_params ??= [];hook.query_params.push({name:'arg_'+(hook.query_params.length+1),source:'runname'});markDirty();renderForm();
+      hook.query_params ??= [];hook.query_params.push({name:'arg_'+(hook.query_params.length+1),source:button.dataset.kind==='manual' ? 'custom' : 'runname',...(button.dataset.kind==='manual' ? {placeholder:''} : {})});markDirty();renderForm();
     });
     $("#editor-form").querySelectorAll('[data-query-remove]').forEach(button=>button.onclick=()=>{
       collectForm();config[button.dataset.kind+'_api'][Number(button.dataset.index)].query_params.splice(Number(button.dataset.queryRemove),1);markDirty();renderForm();
@@ -593,16 +615,16 @@ async function editorPage(eid, data, version) {
   }
   function renderQueryParams(type,index,hook){
     const prefix=`hook-${type}-${index}`;
-    const sources={runname:'Run name',runnumber:'Current Run number',header:'Header',event_num:'Event count',start_time:'Start time (babirl)',stop_time:'Stop time (babirl)',state:'DAQ state',getconfig_json:'getconfig (JSON)',current_run_json:'Current Run record (JSON)',run_history_json:'Run history: latest 50 (JSON)'};
-    return `<div class="section"><label class="check-label"><input type="checkbox" id="${prefix}-query-enabled" data-query-toggle ${hook.send_query_params ? 'checked' : ''}>Send DAQ arguments</label><div ${hook.send_query_params ? '' : 'hidden'}><label>Send as<select class="input" id="${prefix}-argument-transport"><option value="query" ${hook.argument_transport!=='json' ? 'selected' : ''}>Query parameters</option>${type==='monitor' ? '' : `<option value="json" ${hook.argument_transport==='json' ? 'selected' : ''}>JSON body</option>`}</select></label><p class="form-note">${type==='monitor' ? 'GET query parameters use the latest cached DAQ values. JSON objects are sent as JSON strings. No additional DAQ requests are made.' : 'Values are read immediately before this API runs. Run number is the current DAQ value, without padding. Use JSON body for getconfig and history objects.'}</p>${(hook.query_params || []).map((argument,n)=>`<div class="actions section"><label>Argument name<input class="input" id="${prefix}-arg-${n}-name" maxlength="64" value="${html(argument.name)}" placeholder="run_number"></label><label>DAQ value<select class="input" id="${prefix}-arg-${n}-source">${Object.entries(sources).map(([key,label])=>`<option value="${key}" ${argument.source===key ? 'selected' : ''}>${label}</option>`).join('')}</select></label><button type="button" class="button small" data-query-remove="${n}" data-kind="${type}" data-index="${index}">×</button></div>`).join('')}<button type="button" class="button small section" data-query-add data-kind="${type}" data-index="${index}">＋ Add argument</button></div></div>`;
+    const sources=type==='manual' ? {custom:'Free input',...DAQ_ARGUMENT_SOURCES} : DAQ_ARGUMENT_SOURCES;
+    return `<div class="section"><label class="check-label"><input type="checkbox" id="${prefix}-query-enabled" data-query-toggle ${hook.send_query_params ? 'checked' : ''}>${type==='manual' ? 'Send arguments' : 'Send DAQ arguments'}</label><div ${hook.send_query_params ? '' : 'hidden'}><label>Send as<select class="input" id="${prefix}-argument-transport"><option value="query" ${hook.argument_transport!=='json' ? 'selected' : ''}>Query parameters</option>${type==='monitor' ? '' : `<option value="json" ${hook.argument_transport==='json' ? 'selected' : ''}>JSON body</option>`}</select></label><p class="form-note">${type==='monitor' ? 'GET query parameters use the latest cached DAQ values. JSON objects are sent as JSON strings. No additional DAQ requests are made.' : 'Values are read immediately before this API runs. Run number is the current DAQ value, without padding. Use JSON body for getconfig and history objects.'}</p>${(hook.query_params || []).map((argument,n)=>`<div class="actions section"><label>Argument name<input class="input" id="${prefix}-arg-${n}-name" maxlength="64" value="${html(argument.name)}" placeholder="run_number"></label><label>Value source<select class="input" data-argument-source data-kind="${type}" data-index="${index}" id="${prefix}-arg-${n}-source">${Object.entries(sources).map(([key,label])=>`<option value="${key}" ${argument.source===key ? 'selected' : ''}>${label}</option>`).join('')}</select></label><button type="button" class="button small" data-query-remove="${n}" data-kind="${type}" data-index="${index}">×</button></div>${type==='manual' && argument.source==='custom' ? field('Input template (placeholder only)',`${prefix}-arg-${n}-placeholder`,argument.placeholder || '', 'maxlength="1000"') : ''}<p class="form-note argument-description">${html(argumentDescription(argument.source))}</p>`).join('')}<button type="button" class="button small section" data-query-add data-kind="${type}" data-index="${index}">＋ Add argument</button></div></div>`;
   }
   function renderHooks(type) {
     return config[type+"_api"].map((hook,index,array) => `<div class="hook-row" data-hook="${type}">
       <div class="two-columns">${field("Name",`hook-${type}-${index}-name`,hook.name)}${field("URL · full endpoint",`hook-${type}-${index}-api`,hook.api,'type="url"')}</div>
       <label class="check-label"><input type="checkbox" id="hook-${type}-${index}-enabled" ${hook.enabled!==false ? 'checked' : ''}>Enabled</label>
       ${field("Token environment variable (optional)",`hook-${type}-${index}-token`,hook.token_env || "")}
-      ${type==='monitor' ? renderMonitorFields(index,hook)+renderQueryParams(type,index,hook) : type==='restart' ? '' : renderQueryParams(type,index,hook)}
-      <div class="hook-row-actions">${!['restart','monitor'].includes(type) ? `<label class="check-label"><input type="checkbox" id="hook-${type}-${index}-nssta" ${hook.run_on_nssta ? "checked" : ""}>Also run for NSSTA</label>` : `<span class="small-text muted">${type==='monitor' ? 'Scheduled GET · display only' : 'Runs while DAQ is idle'}</span>`}
+      ${type==='manual' ? `<div class="section"><span class="small-text">Available</span><div class="actions">${Object.entries({always:'Every time',running:'During running',idle:'During IDLE'}).map(([key,label])=>`<label class="check-label"><input type="checkbox" data-manual-timing="${key}" data-index="${index}" id="manual-${index}-timing-${key}" ${(hook.timings || ['always']).includes(key) ? 'checked' : ''}>${label}</label>`).join('')}</div><p class="form-note">Every time includes unavailable DAQ states. During running includes NSSTA. During IDLE requires a confirmed stopped state.</p></div><div class="two-columns"><label>Method<select class="input" id="manual-${index}-method"><option ${hook.method==='GET' ? 'selected' : ''}>GET</option><option ${hook.method!=='GET' ? 'selected' : ''}>POST</option></select></label>${field('Timeout (seconds)',`manual-${index}-timeout`,hook.timeout_sec ?? 10,'type="number" min="1" max="3600"')}</div>` : ''}${type==='monitor' ? renderMonitorFields(index,hook)+renderQueryParams(type,index,hook) : type==='restart' ? '' : renderQueryParams(type,index,hook)}
+      <div class="hook-row-actions">${!['restart','monitor','manual'].includes(type) ? `<label class="check-label"><input type="checkbox" id="hook-${type}-${index}-nssta" ${hook.run_on_nssta ? "checked" : ""}>Also run for NSSTA</label>` : `<span class="small-text muted">${type==='monitor' ? 'Scheduled GET · display only' : type==='manual' ? 'Run manually from the API tab' : 'Runs while DAQ is idle'}</span>`}
       <div class="hook-order"><span>${index+1}</span><button class="button small" type="button" title="Move up" data-kind="${type}" data-index="${index}" data-move="-1" ${index === 0 ? "disabled" : ""}>↑</button><button class="button small" type="button" title="Move down" data-kind="${type}" data-index="${index}" data-move="1" ${index === array.length-1 ? "disabled" : ""}>↓</button><button class="button small" type="button" data-kind="${type}" data-remove="${index}" title="Remove API">×</button></div></div></div>`).join("") || `<p class="small-text muted" style="margin:0">No APIs configured. This step will be skipped.</p>`;
   }
   function renderMonitorFields(index,hook){
@@ -617,14 +639,15 @@ async function editorPage(eid, data, version) {
     config.eb = {name:$("#edit-eb-name").value,host:$("#edit-eb-host").value};
     config.run_control_api = {name:$("#edit-api-name").value,api:$("#edit-api-url").value,enable_nssta:$("#edit-nssta").checked,event_poll_interval_sec:Number($("#edit-event-interval").value),start_timeout:Number($("#edit-start-timeout").value),stop_timeout:Number($("#edit-stop-timeout").value),restart_enable_after_sec:Number($("#edit-restart-delay").value),idle_connection_interval_sec:Number($("#edit-idle-interval").value)};
     if ($("#edit-api-token").value.trim()) config.run_control_api.token_env = $("#edit-api-token").value.trim();
-    for (const type of ["start","stop","restart","monitor"]) config[type+"_api"] = config[type+"_api"].map((_,index) => {
+    for (const type of ["start","stop","restart","monitor","manual"]) config[type+"_api"] = config[type+"_api"].map((_,index) => {
       const hook = {name:$(`#hook-${type}-${index}-name`).value,api:$(`#hook-${type}-${index}-api`).value,enabled:$(`#hook-${type}-${index}-enabled`).checked};
-      if (!['restart','monitor'].includes(type)) hook.run_on_nssta = $(`#hook-${type}-${index}-nssta`).checked;
+      if (!['restart','monitor','manual'].includes(type)) hook.run_on_nssta = $(`#hook-${type}-${index}-nssta`).checked;
       if(type!=='restart'){
         hook.send_query_params=$(`#hook-${type}-${index}-query-enabled`).checked;
         if(type!=='monitor') hook.argument_transport=$(`#hook-${type}-${index}-argument-transport`).value;
-        hook.query_params=(_.query_params || []).map((argument,n)=>({name:$(`#hook-${type}-${index}-arg-${n}-name`).value.trim(),source:$(`#hook-${type}-${index}-arg-${n}-source`).value}));
+        hook.query_params=(_.query_params || []).map((argument,n)=>({name:$(`#hook-${type}-${index}-arg-${n}-name`).value.trim(),source:$(`#hook-${type}-${index}-arg-${n}-source`).value,...(type==='manual' ? {placeholder:$(`#hook-${type}-${index}-arg-${n}-placeholder`)?.value ?? argument.placeholder ?? ''} : {})}));
       }
+      if(type==='manual'){hook.timings=['always','running','idle'].filter(key=>$(`#manual-${index}-timing-${key}`).checked);hook.method=$(`#manual-${index}-method`).value;hook.timeout_sec=Number($(`#manual-${index}-timeout`).value);}
       if(type==='monitor'){hook.interval_sec=Number($(`#monitor-${index}-interval`).value);hook.timeout_sec=Number($(`#monitor-${index}-timeout`).value);hook.timing=$(`#monitor-${index}-timing`).value;}
       const token = $(`#hook-${type}-${index}-token`).value.trim(); if (token) hook.token_env = token;
       return hook;

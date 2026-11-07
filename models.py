@@ -88,6 +88,31 @@ class MonitorEndpoint(EnabledEndpoint):
     timing: Literal['always','running','idle'] = 'always'
 
 
+class ManualArgument(QueryArgument):
+    source: Literal['custom','runname','runnumber','header','event_num','start_time','stop_time','state','getconfig_json','run_history_json','current_run_json'] = 'custom'
+    placeholder: str = Field(default='',max_length=1000)
+
+
+class ManualEndpoint(EnabledEndpoint):
+    method: Literal['GET','POST'] = 'POST'
+    timings: list[Literal['always','running','idle']] = Field(default_factory=lambda:['always'],min_length=1,max_length=2)
+    timeout_sec: float = Field(default=10,ge=1,le=3600)
+    send_query_params: bool = False
+    argument_transport: Literal['query','json'] = 'query'
+    query_params: list[ManualArgument] = Field(default_factory=list,max_length=32)
+
+    @model_validator(mode='after')
+    def valid_arguments(self):
+        if len(set(self.timings)) != len(self.timings) or ('always' in self.timings and len(self.timings)>1):
+            raise ValueError('Select Every time alone, or During running and/or During IDLE')
+        names = [item.name for item in self.query_params]
+        if len(names) != len(set(names)):
+            raise ValueError('Argument names must be unique within an API')
+        if self.method == 'GET' and self.argument_transport == 'json':
+            raise ValueError('JSON body requires POST')
+        return self
+
+
 class Babimo(Strict):
     efn: Optional[int] = Field(default=None,ge=0,le=255,strict=True)
     babinfo: bool = False
@@ -107,9 +132,10 @@ class ExperimentConfig(Strict):
     start_api: list[Hook] = Field(default_factory=list, max_length=100)
     stop_api: list[Hook] = Field(default_factory=list, max_length=100)
     monitor_api: list[MonitorEndpoint] = Field(default_factory=list,max_length=100)
+    manual_api: list[ManualEndpoint] = Field(default_factory=list,max_length=100)
     babimo: Babimo = Field(default_factory=Babimo)
 
-    @field_validator("restart_api", "start_api", "stop_api", "monitor_api", mode="before")
+    @field_validator("restart_api", "start_api", "stop_api", "monitor_api", "manual_api", mode="before")
     @classmethod
     def empty_hooks(cls, value):
         # A YAML key with only comments is null, not an empty list.

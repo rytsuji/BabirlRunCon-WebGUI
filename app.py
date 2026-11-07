@@ -17,12 +17,13 @@ from pydantic import Field, field_validator, model_validator
 
 from controllers import HttpController
 from monitor_api import read_monitor
+from manual_api import execute_manual
 from models import Babimo, Experiment, ExperimentConfig, RunControlEndpoint, ServerConfig, Strict
 from monitor import Monitor
 from service import ControlService
 from storage import Store, now
 
-BUILD_ID = "v1-20261105-layout-10"
+BUILD_ID = "v1-20261107-api-11"
 BASE = Path(__file__).resolve().parent
 
 
@@ -89,6 +90,18 @@ class WebutilWrite(Strict):
 class DeleteExperiment(Strict):
     confirmation: str
     revision: str
+
+
+class ManualRequest(Strict):
+    revision: str
+    arguments: dict[str,str] = Field(default_factory=dict,max_length=32)
+
+    @field_validator('arguments')
+    @classmethod
+    def bounded_arguments(cls, value):
+        if any(len(key)>64 or len(text)>65536 for key,text in value.items()):
+            raise ValueError('API argument is too long')
+        return value
 
 
 class ProcessAction(Strict):
@@ -465,6 +478,27 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
             return JSONResponse({'status':'fail','message':'Monitor request cancelled'},status_code=499)
         if config_for(eid)[2]!=revision:raise HTTPException(409,'Monitor configuration changed')
         return {**result,'revision':revision}
+
+    @app.post('/api/experiments/{eid}/manual/{index}')
+    async def manual_execute(eid:str,index:int,payload:ManualRequest,request:Request):
+        config,_,revision=config_for(eid)
+        if payload.revision!=revision:raise HTTPException(409,'Configuration changed. Reload the page.')
+        if not 0<=index<len(config.manual_api):raise HTTPException(404,'API not found')
+        endpoint=config.manual_api[index]
+        if not endpoint.enabled:raise HTTPException(409,'API is disabled')
+        custom={item.name for item in endpoint.query_params if item.source=='custom'} if endpoint.send_query_params else set()
+        if set(payload.arguments)-custom:raise HTTPException(422,'Unknown custom argument')
+        state={}
+        if 'always' not in endpoint.timings or (endpoint.send_query_params and any(item.source not in ('custom','run_history_json','current_run_json') for item in endpoint.query_params)):
+            try:state=await adapter.status(eid,config)
+            except Exception as exc:return {'success':False,'error':str(exc),'checked_at':now()}
+        if 'always' not in endpoint.timings:
+            phase='running' if state.get('state') in ('running','nssta') else 'idle' if state.get('state')=='stopped' else 'unknown'
+            if phase not in endpoint.timings:raise HTTPException(409,'API is not available in the current DAQ state')
+        try:result=await execute_manual(monitor_client,endpoint,payload.arguments,request,state,store,eid)
+        except asyncio.CancelledError:return JSONResponse({'success':False,'error':'Request cancelled'},status_code=499)
+        if config_for(eid)[2]!=revision:raise HTTPException(409,'Configuration changed. Response discarded.')
+        return result
 
     app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 
