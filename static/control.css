@@ -35,7 +35,7 @@
 .es-connection-list{max-height:105px;overflow:auto;margin-top:6px}
 .es-connection-item{display:grid;grid-template-columns:45px minmax(70px,1fr) auto;gap:5px;font-size:10px;padding:3px 0}
 .es-connection-item>.error-text{grid-column:1/-1}
-.operation-panel #operation-body{max-height:86px;overflow:auto;overscroll-behavior:contain}
+.operation-panel #operation-body{max-height:none;overflow:auto;overscroll-behavior:contain}
 .operation-panel .step-empty{padding:7px 0;text-align:left}
 .operation-panel .step-item{padding:8px 0}
 .operation-panel #operation-body>p{margin-bottom:8px!important}

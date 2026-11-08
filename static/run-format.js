@@ -32,7 +32,7 @@ function formatDAQ(value, key = "") {
 function runSummary(record) {
   const run = record.daq_config?.runinfo || {};
   return {...record, runname:run.runname ?? record.runname, runnumber:run.runnumber ?? record.runnumber,
-    header:run.header ?? record.header, started_at:run.startdate ?? record.started_at, finished_at:run.stopdate ?? record.finished_at};
+    header:run.header ?? record.header, ender:run.ender ?? record.ender ?? "", started_at:run.startdate ?? record.started_at, finished_at:run.stopdate ?? record.finished_at};
 }
 
 function runDownload(record) {

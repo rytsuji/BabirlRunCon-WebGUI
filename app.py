@@ -23,7 +23,7 @@ from monitor import Monitor
 from service import ControlService
 from storage import Store, now
 
-BUILD_ID = "v1-20261108-editor-17"
+BUILD_ID = "v1-20261109-ui-18"
 BASE = Path(__file__).resolve().parent
 
 

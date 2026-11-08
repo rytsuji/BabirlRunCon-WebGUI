@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261108-editor-17";
+const GUI_BUILD = "v1-20261109-ui-18";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -220,7 +220,7 @@ async function controlPage(eid, config, version, revision) {
       </div><div class="panel-foot small-text muted" id="last-checked">Values are read from the DAQ controller.</div></section>
     </div>
     <section id="view-api" role="tabpanel" aria-labelledby="tab-api" class="section" hidden></section>
-    <section id="view-history" role="tabpanel" aria-labelledby="tab-history" class="panel section" hidden><div class="panel-head"><h2>Run history</h2><label class="actions">Mode <select id="history-mode" class="input"><option value="saved" selected>Saved</option><option value="nssta">NSSTA</option><option value="all">All</option></select></label></div><p id="history-error" class="notice amber" hidden></p><div class="table-scroll"><table><thead><tr><th>Run</th><th>Mode</th><th>Header</th><th>Started</th><th>Status</th><th></th></tr></thead><tbody id="run-history"><tr><td colspan="6" class="empty-cell">No recorded Runs yet.</td></tr></tbody></table></div></section>${footer()}`;
+    <section id="view-history" role="tabpanel" aria-labelledby="tab-history" class="panel section" hidden><div class="panel-head"><h2>Run history</h2><label class="actions">Mode <select id="history-mode" class="input"><option value="saved" selected>Saved</option><option value="nssta">NSSTA</option><option value="all">All</option></select></label></div><p id="history-error" class="notice amber" hidden></p><div class="table-scroll"><table><thead><tr><th>Run</th><th>Mode</th><th>Header</th><th>Ender</th><th>Started</th><th>Status</th><th></th></tr></thead><tbody id="run-history"><tr><td colspan="7" class="empty-cell">No recorded Runs yet.</td></tr></tbody></table></div></section>${footer()}`;
 
   const workspace=$("#view-control");
   for(const panelNames of [["run-settings-panel","operation-panel"],["overview-panel","connection-panel"]]){
@@ -276,7 +276,7 @@ async function controlPage(eid, config, version, revision) {
     };
   }
   selectTab("control");
-  $("#history-mode").onchange=()=>{historyMode=$("#history-mode").value;loadedHistoryVersion=null;$("#run-history").innerHTML='<tr><td colspan="6">Loading Runs…</td></tr>';poll();};
+  $("#history-mode").onchange=()=>{historyMode=$("#history-mode").value;loadedHistoryVersion=null;$("#run-history").innerHTML='<tr><td colspan="7">Loading Runs…</td></tr>';poll();};
   $("#refresh-connections").onclick = () => { connectionsRequested = true; forceConnections=true; refreshRequested = true; poll(); };
   $("#esconnect").onclick=async event=>{
     event.preventDefault();event.stopPropagation();
@@ -509,7 +509,7 @@ async function controlPage(eid, config, version, revision) {
         const selected = $("#recall").value;
         $("#recall").innerHTML = `<option value="">Choose a saved Run name…</option>` + hist.recall.runs.map((r,index) => `<option value="${index}">${html(r.name)} · ${runNumber(r.current_number)}</option>`).join("");
         $("#recall").value = selected;
-        $("#run-history").innerHTML = hist.runs.map((run,index) => `<tr><td><strong>${html(run.runname)}</strong> <span class="mono muted">${runNumber(run.runnumber)}</span></td><td>${run.mode === "nssta" ? "NSSTA" : "Saved"}</td><td class="wrap">${html(run.header)}</td><td>${html(formatTime(run.started_at))}</td><td>${pill(run.status, ["completed","stopped"].includes(run.status) ? "green" : run.status === "running" ? "blue" : ["failed","postprocess_failed","unknown"].includes(run.status) ? "red" : "")}</td><td class="actions"><button class="button small" data-inspect="${index}" aria-expanded="false">Details ↓</button><!-- <button class="button small" data-download="${index}">JSON ↓</button> --></td></tr><tr id="run-detail-${index}" hidden><td colspan="6"><div class="run-expanded">${formatDAQ(runDownload(run))}</div></td></tr>`).join("") || `<tr><td colspan="6" class="empty-cell">No Runs match this mode.</td></tr>`;
+        $("#run-history").innerHTML = hist.runs.map((run,index) => `<tr><td><strong>${html(run.runname)}</strong> <span class="mono muted">${runNumber(run.runnumber)}</span></td><td>${run.mode === "nssta" ? "NSSTA" : "Saved"}</td><td class="wrap">${html(run.header)}</td><td class="wrap">${html(run.ender || "")}</td><td>${html(formatTime(run.started_at))}</td><td>${pill(run.status, ["completed","stopped"].includes(run.status) ? "green" : run.status === "running" ? "blue" : ["failed","postprocess_failed","unknown"].includes(run.status) ? "red" : "")}</td><td class="actions"><button class="button small" data-inspect="${index}" aria-expanded="false">Details ↓</button><!-- <button class="button small" data-download="${index}">JSON ↓</button> --></td></tr><tr id="run-detail-${index}" hidden><td colspan="7"><div class="run-expanded">${formatDAQ(runDownload(run))}</div></td></tr>`).join("") || `<tr><td colspan="7" class="empty-cell">No Runs match this mode.</td></tr>`;
         $("#run-history").querySelectorAll("[data-inspect]").forEach(button => button.onclick = () => {
           const row = $("#run-detail-" + button.dataset.inspect);
           row.hidden = !row.hidden;
