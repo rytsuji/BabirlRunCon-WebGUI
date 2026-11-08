@@ -3,22 +3,43 @@
 class MonitorPoller {
   constructor({request,onResult,setTimer=(fn,delay)=>setTimeout(fn,delay),clearTimer=id=>clearTimeout(id),clock=Date.now}) {
     Object.assign(this,{request,onResult,setTimer,clearTimer,clock});
-    this.slots=[];this.visible=false;this.state='unknown';this.revision='';
+    this.slots=[];this.visible=false;this.state='unknown';this.revision='';this.ready=true;this.lastStableState=null;this.transition='';
   }
   configure(items,revision) {
     this.stop();this.revision=revision;
-    this.slots=items.map((item,index)=>({item,index,generation:0,active:false,timer:null,deadline:null,controller:null}));
+    this.slots=items.map((item,index)=>({item,index,generation:0,active:false,timer:null,deadline:null,controller:null,refreshPending:false}));
     this.sync();
   }
   eligible(item) {
-    return this.visible && item.enabled!==false && (item.timing==='always' || !item.timing ||
+    const needsOverview=item.send_query_params && (item.query_params || []).some(arg=>!['run_history_json','current_run_json'].includes(arg.source));
+    return this.visible && (!needsOverview || this.ready) && item.enabled!==false && (item.timing==='always' || !item.timing ||
       item.timing==='running' && ['running','nssta'].includes(this.state) || item.timing==='idle' && this.state==='stopped');
   }
-  context(visible,state) {this.visible=visible;this.state=state;this.sync();}
+  context(visible,state,ready=true,transition='') {
+    const active=new Set(this.slots.filter(slot=>slot.active));
+    const stable=['stopped','running','nssta'].includes(state);
+    const stateChanged=stable && this.lastStableState && this.lastStableState!==state;
+    const operationChanged=transition && this.transition && transition!==this.transition;
+    // State and operation history can arrive in adjacent status responses.
+    const sameTransition=operationChanged && !stateChanged && this.pendingTransition?.state===state && this.clock()-this.pendingTransition.at<3000;
+    const changed=stateChanged || (operationChanged && !sameTransition);
+    if(stateChanged && !operationChanged)this.pendingTransition={state,at:this.clock()};
+    else if(operationChanged)this.pendingTransition=null;
+    this.visible=visible;this.state=state;this.ready=ready;
+    if(stable)this.lastStableState=state;
+    if(transition)this.transition=transition;
+    this.sync();
+    if(changed)this.slots.forEach(slot=>{if(active.has(slot) && slot.active)this.refreshSlot(slot);});
+  }
+  refreshSlot(slot) {
+    if(slot.controller){slot.refreshPending=true;return;}
+    this.clearTimer(slot.timer);slot.timer=null;this.read(slot);
+  }
   pause(slot) {
     slot.active=false;slot.generation++;this.clearTimer(slot.timer);slot.timer=null;
     this.clearTimer(slot.deadline);slot.deadline=null;
     slot.controller?.abort();slot.controller=null;
+    slot.refreshPending=false;
   }
   stop() {this.slots.forEach(slot=>this.pause(slot));}
   sync() {
@@ -45,7 +66,8 @@ class MonitorPoller {
       if(current()){
         slot.controller=null;
         slot.deadline=null;
-        slot.timer=this.setTimer(()=>this.read(slot),Math.max(0,(slot.item.interval_sec ?? 5)*1000-(this.clock()-started)));
+        if(slot.refreshPending){slot.refreshPending=false;this.read(slot);}
+        else slot.timer=this.setTimer(()=>this.read(slot),Math.max(0,(slot.item.interval_sec ?? 5)*1000-(this.clock()-started)));
       }
     }
   }
@@ -80,7 +102,7 @@ function mountMonitors({workspace,base,items,revision,isLive}) {
     poller.configure(definitions,revision);
   }
   configure(definitions,revision);
-  return {configure,context:(visible,state)=>poller.context(visible,state),stop:()=>poller.stop(),destroy:()=>{poller.stop();panel.remove();}};
+  return {configure,context:(visible,state,ready,transition)=>poller.context(visible,state,ready,transition),stop:()=>poller.stop(),destroy:()=>{poller.stop();panel.remove();}};
 }
 
 if(typeof module!=='undefined')module.exports={MonitorPoller};

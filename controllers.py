@@ -69,8 +69,8 @@ class HttpController:
             raise RuntimeError("Run Control operation was not verified")
         return data["data"]
 
-    async def snapshot(self, eid, config):
-        raw = await self.request(config, "GET", "/api/v1/run/config")
+    @staticmethod
+    def decode_config(raw):
         run = raw["runinfo"]
         # Missing/invalid mandatory fields must never become a default IDLE.
         state = {"state": {"IDLE": "stopped", "START": "running", "NSSTA": "nssta"}.get(run["runstatus"], "unknown"),
@@ -79,6 +79,11 @@ class HttpController:
                  "hdlist": raw.get("hdlist", []), "ef_info": raw.get("eflist", []),
                  "raw_config": raw, "acquisition_errors": {}, "event_num": None,
                  "es_event_num": {}, "target": {}}
+        return state
+
+    async def snapshot(self, eid, config):
+        raw = await self.request(config, "GET", "/api/v1/run/config")
+        state = self.decode_config(raw)
 
         try:
             target = await self.client.get(config.run_control_api.api + "/api/v1/target",

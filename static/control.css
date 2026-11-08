@@ -114,3 +114,13 @@
 @media(max-width:850px){.monitor-panel{width:100%}}
 
 .control-workspace{grid-template-areas:none}.control-column{display:flex;flex-direction:column;gap:10px;min-width:0}.control-column>.panel{grid-area:auto}@media(max-width:850px){.control-workspace{display:flex;flex-direction:column}.control-column{width:100%}}
+
+/* Keep desktop column bottoms aligned without fixing the viewport height. */
+@media(min-width:851px){
+ .control-workspace{align-items:stretch}
+ .control-column{align-self:stretch}
+ .control-column>.operation-panel,.control-column>.connection-panel{flex:1;display:flex;flex-direction:column}
+ .control-column>.operation-panel>.panel-body,.control-column>.connection-panel>.panel-body{flex:1}
+ .control-workspace>.monitor-panel{align-self:stretch;display:flex;flex-direction:column}
+ .monitor-panel>.panel-body{flex:1;align-content:start}
+}

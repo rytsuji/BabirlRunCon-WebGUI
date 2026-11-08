@@ -23,7 +23,7 @@ from monitor import Monitor
 from service import ControlService
 from storage import Store, now
 
-BUILD_ID = "v1-20261108-history-13"
+BUILD_ID = "v1-20261108-shared-14"
 BASE = Path(__file__).resolve().parent
 
 
@@ -373,15 +373,23 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
         finally:
             op["finished_at"] = now()
             service.persist(eid,op)
-            monitor.invalidate(eid)
             service.active.pop(service.key(config),None)
 
     @app.get('/api/experiments/{eid}/webutil/{kind}')
-    async def webutil_read(eid:str,kind:Literal['config','es','raw'],efn:Optional[int]=None):
+    async def webutil_read(eid:str,kind:Literal['config','es','raw'],efn:Optional[int]=None,refresh:bool=False):
         config,_,_=config_for(eid)
         if kind=='es' and (efn is None or not 0<=efn<=255):
             raise HTTPException(422,'Select an ES number from 0 to 255')
-        try:return await adapter.webutil(eid,config,kind,efn=efn)
+        try:
+            shared=monitor.arguments(eid,config)
+            if kind=='config' and not refresh and shared.get('raw_config'):
+                return shared['raw_config']
+            raw=await adapter.webutil(eid,config,kind,efn=efn)
+            if kind=='config' and hasattr(adapter,'decode_config'):
+                state=adapter.decode_config(raw)
+                state['target']=shared.get('target',{})
+                monitor.publish(eid,config,state)
+            return raw
         except Exception as exc:raise HTTPException(502,f'Webutil API: {exc}')
 
     @app.put('/api/experiments/{eid}/webutil')
@@ -394,6 +402,11 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
             await service.check_state(eid,config,{'stopped'})
             if store.active_run(eid):raise RuntimeError('Resolve the unfinished Run before editing DAQ settings')
             result=await service.step(eid,op,'Set '+body.kind,lambda:adapter.webutil(eid,config,body.kind,body.payload,body.efn))
+            if isinstance(result.get('after'),dict) and result['after'].get('runinfo') and hasattr(adapter,'decode_config'):
+                shared=monitor.arguments(eid,config)
+                verified=adapter.decode_config(result['after'])
+                verified['target']=shared.get('target',{})
+                monitor.publish(eid,config,verified)
             op.update(status='succeeded',message='Settings verified')
             return result
         except Exception as exc:
@@ -416,6 +429,7 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
             await service.step(eid, op, "Apply Run settings to DAQ",
                                lambda: adapter.configure(eid, config, edit.runname, edit.runnumber))
             state = await adapter.status(eid, config)
+            monitor.publish(eid,config,state)
             if state["runname"] != edit.runname or state["runnumber"] != edit.runnumber:
                 raise RuntimeError("DAQ readback does not match the requested values.")
             store.remember(eid, state)
@@ -497,7 +511,7 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
         endpoint=config.monitor_api[index]
         if not endpoint.enabled:raise HTTPException(409,'Monitor is disabled')
         try:result=await read_monitor(monitor_client,endpoint,request,
-                                     state=monitor.cache.get(eid,{}).get('state'),store=store,eid=eid)
+                                     state=monitor.arguments(eid,config),store=store,eid=eid)
         except asyncio.CancelledError:
             return JSONResponse({'status':'fail','message':'Monitor request cancelled'},status_code=499)
         if config_for(eid)[2]!=revision:raise HTTPException(409,'Monitor configuration changed')
@@ -522,9 +536,12 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
 
         async def run_manual():
             try:
-                state={}
-                if restricted or (endpoint.send_query_params and any(item.source not in ('custom','run_history_json','current_run_json') for item in endpoint.query_params)):
-                    try:state=await adapter.status(eid,config)
+                state=monitor.arguments(eid,config)
+                if restricted:
+                    try:
+                        live=await getattr(adapter,'snapshot',adapter.status)(eid,config)
+                        monitor.publish(eid,config,live)
+                        state=monitor.arguments(eid,config)
                     except Exception as exc:return {'success':False,'error':str(exc),'checked_at':now()}
                 if restricted:
                     phase='running' if state.get('state') in ('running','nssta') else 'idle' if state.get('state')=='stopped' else 'unknown'

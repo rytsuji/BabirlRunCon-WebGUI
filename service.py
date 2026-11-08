@@ -46,6 +46,7 @@ class ControlService:
     async def check_state(self, eid, config, allowed):
         try:
             state = await self.controller.status(eid, config)
+            if self.monitor:self.monitor.publish(eid,config,state)
         except Exception as exc:
             raise RuntimeError(f"Unable to read DAQ state: {exc}") from exc
         if state["state"] not in allowed:
@@ -148,7 +149,11 @@ class ControlService:
             step["finished_at"] = now()
             self.persist(eid, op)
 
-    async def hooks(self, eid, config, op, hooks, nssta=False):
+    async def hooks(self, eid, config, op, hooks, nssta=False, state=None):
+        # Operation preflight/Stop verification already obtained a fresh snapshot.
+        # Resolve a whole hook batch from that snapshot, not once per endpoint.
+        if state is None and any(h.enabled and (not nssta or h.run_on_nssta) and getattr(h,'send_query_params',False) and h.query_params for h in hooks):
+            state=await self.controller.status(eid,config)
         for hook in hooks:
             if not hook.enabled:continue
             if nssta and not hook.run_on_nssta:
@@ -159,7 +164,6 @@ class ControlService:
                 step["api"] = hook.api
                 query_params={}
                 if getattr(hook,'send_query_params',False) and hook.query_params:
-                    state=await self.controller.status(eid,config)
                     for argument in hook.query_params:
                         if argument.source=='getconfig_json':value=state.get('raw_config')
                         elif argument.source=='run_history_json':value=[self.store.public_run(run) for run in self.store.runs(eid)]
@@ -187,6 +191,7 @@ class ControlService:
             while True:
                 try:
                     state = await reader(eid, config)
+                    if self.monitor:self.monitor.publish(eid,config,state)
                     if state["state"] in allowed:
                         return state
                 except Exception:
@@ -221,6 +226,7 @@ class ControlService:
                 while asyncio.get_running_loop().time()<deadline:
                     try:
                         state=await self.controller.status(eid,config)
+                        if self.monitor:self.monitor.publish(eid,config,state)
                         if state['state'] in allowed and not state.get('acquisition_errors'):
                             if op['action']=='stop':
                                 connections=await self.connections(eid,config,False)
@@ -255,7 +261,7 @@ class ControlService:
                        "daq_config": before["raw_config"], "event_num": before["event_num"],
                        "es_event_num": before["es_event_num"]}
                 self.store.put_run(eid, run)
-                await self.hooks(eid, config, op, config.start_api, action == "nssta")
+                await self.hooks(eid, config, op, config.start_api, action == "nssta", state=before)
                 await self.check_state(eid, config, {"stopped"})
                 await self.connections(eid,config,False)
                 # From this point a lost response can mean DAQ actually started.
@@ -325,8 +331,7 @@ class ControlService:
                 self.store.put_run(eid, run)
                 self.store.remember(eid, state)
                 try:
-                    await self.connections(eid,config,False)
-                    await self.hooks(eid, run_config, op, run_config.stop_api, mode == "nssta")
+                    await self.hooks(eid, run_config, op, run_config.stop_api, mode == "nssta", state=state)
                 except BaseException:
                     run["status"] = "postprocess_failed"
                     self.store.put_run(eid, run)

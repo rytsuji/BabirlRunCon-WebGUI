@@ -6,6 +6,10 @@ from controllers import auth_headers
 from storage import now
 
 
+class WaitingForOverview(ValueError):
+    pass
+
+
 async def read_monitor(client,endpoint,request,state=None,store=None,eid=None):
     async def fetch():
         params = {}
@@ -20,7 +24,7 @@ async def read_monitor(client,endpoint,request,state=None,store=None,eid=None):
                     key = 'raw_config' if argument.source == 'getconfig_json' else argument.source
                     value = (state or {}).get(key)
                 if value is None:
-                    raise ValueError(f'DAQ value is unavailable: {argument.source}')
+                    raise WaitingForOverview(f'Waiting for Run overview data: {argument.source}')
                 params[argument.name] = json.dumps(value,ensure_ascii=False,separators=(',',':')) if isinstance(value,(dict,list)) else str(value)
         url = httpx.URL(endpoint.api).copy_merge_params(params) if params else endpoint.api
         async with client.stream('GET',url,headers=auth_headers(endpoint),
@@ -46,6 +50,8 @@ async def read_monitor(client,endpoint,request,state=None,store=None,eid=None):
         if watcher in done:
             raise asyncio.CancelledError()
         try:result=await task
+        except WaitingForOverview as exc:
+            result={'status':'waiting','data':None,'message':str(exc)}
         except (asyncio.TimeoutError,httpx.TimeoutException):
             result={'status':'timeout','data':None,'message':f'Timed out after {endpoint.timeout_sec:g} seconds'}
         except Exception as exc:

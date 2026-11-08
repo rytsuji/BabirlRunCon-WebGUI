@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261108-history-13";
+const GUI_BUILD = "v1-20261108-shared-14";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -184,7 +184,7 @@ async function controlPage(eid, config, version, revision) {
   let stopWaitStarted=null, stopWaitTicker=null, stopWaitId=null;
   let lastErrorSignature='', lastRestartFinished=null, lastTransitionId=null;
   let current = null, historyData = {runs:[], recall:{runs:[]}, operations:[]};
-  let draftDirty = false, headerDirty = false, pending = false, historyError = "", refreshRequested = true, loadedHistoryVersion = null, connectionsRequested = true;
+  let draftDirty = false, headerDirty = false, pending = false, historyError = "", refreshRequested = true, loadedHistoryVersion = null, connectionsRequested = true, forceConnections=false;
   app.classList.add("control-page");
   document.body.classList.add("compact-control");
   $("#top-experiment").innerHTML=`<h1>${html(config.experiment.name)}</h1><p>${html(config.experiment.description)}</p>`;
@@ -231,7 +231,11 @@ async function controlPage(eid, config, version, revision) {
 
   let monitorRevision=revision;
   const monitors=mountMonitors({workspace,base,items:config.monitor_api,revision,isLive:()=>version===routeVersion});
-  function monitorContext(){monitors.context(selectedModule==='control' && !document.hidden,current?.connected && !current.active_operation ? current.state.state : 'unknown');}
+  function monitorContext(){
+    const transition=historyData.operations.find(op=>['start','nssta','stop','restart'].includes(op.action) && op.finished_at)?.id || '';
+    monitors.context(selectedModule==='control' && !document.hidden,current?.connected && !current.active_operation ? current.state.state : 'unknown',
+      current?.state?.runname!=null,transition);
+  }
   document.addEventListener('visibilitychange',monitorContext);
   pageCleanup=()=>{monitors.destroy();document.removeEventListener('visibilitychange',monitorContext);};
   const utilities = mountWebutil({eid,config,isLive:()=>version===routeVersion,getState:()=>current,
@@ -258,7 +262,7 @@ async function controlPage(eid, config, version, revision) {
     utilities.activate(name);
     manualAPIs.activate(name==="api");
     monitorContext();
-    if(returningToControl) { connectionsRequested=true; refreshRequested=true; poll(); }
+    if(returningToControl) { connectionsRequested=true;forceConnections=true; refreshRequested=true; poll(); }
   }
   for (const name of utilities.ids) {
     const tab = $("#tab-" + name);
@@ -273,7 +277,7 @@ async function controlPage(eid, config, version, revision) {
   }
   selectTab("control");
   $("#history-mode").onchange=()=>{historyMode=$("#history-mode").value;loadedHistoryVersion=null;$("#run-history").innerHTML='<tr><td colspan="6">Loading Runs…</td></tr>';poll();};
-  $("#refresh-connections").onclick = () => { connectionsRequested = true; refreshRequested = true; poll(); };
+  $("#refresh-connections").onclick = () => { connectionsRequested = true; forceConnections=true; refreshRequested = true; poll(); };
   $("#esconnect").onclick=async event=>{
     event.preventDefault();event.stopPropagation();
     try{await api(base+'/connections/connect',{method:'POST'});connectionsRequested=true;refreshRequested=true;await poll();}
@@ -402,7 +406,7 @@ async function controlPage(eid, config, version, revision) {
       const readErrors=Object.values(status.state?.acquisition_errors || {});
       const errorSignature=JSON.stringify([status.control_errors || [],readErrors]);
       if(errorSignature!==lastErrorSignature){
-        if((status.control_errors || []).length || readErrors.length)connectionsRequested=true;
+        if((status.control_errors || []).length || readErrors.length){connectionsRequested=true;forceConnections=true;}
         lastErrorSignature=errorSignature;
       }
       const restarted=hist.operations.find(op=>op.action==='restart' && op.finished_at);
@@ -416,10 +420,12 @@ async function controlPage(eid, config, version, revision) {
       }
       if (connectionsRequested && !status.active_operation) {
         connectionsRequested = false;
-        if (status.connected) {
+        const justChecked=status.es_connections?.checked_at && Date.now()-Date.parse(status.es_connections.checked_at)<1000;
+        if (status.connected && (forceConnections || !justChecked)) {
           try { status.es_connections = await api(base+"/connections/refresh",{method:"POST"}); }
           catch (error) { status.es_connections = {supported:true,items:[],error:error.message}; }
         }
+        forceConnections=false;
       }
       if (version !== routeVersion) return;
       if(status.config_revision && status.config_revision!==monitorRevision){
@@ -428,7 +434,7 @@ async function controlPage(eid, config, version, revision) {
         if(version!==routeVersion)return;
         monitorRevision=latest.revision;monitors.configure(latest.config.monitor_api,monitorRevision);
       }
-      current = status; manualAPIs.update(); monitorContext(); restartOverride=!!status.restart_unlocked; historyData = hist;
+      current = status;historyData = hist; manualAPIs.update(); monitorContext(); restartOverride=!!status.restart_unlocked;
       const waiting=status.active_operation;
       if(waiting?.wait_started_at){
         clearTimeout(stopWaitTicker);
@@ -651,7 +657,7 @@ async function editorPage(eid, data, version) {
   function renderQueryParams(type,index,hook){
     const prefix=`hook-${type}-${index}`;
     const sources=type==='manual' ? {custom:'Free input',...DAQ_ARGUMENT_SOURCES} : DAQ_ARGUMENT_SOURCES;
-    return `<div class="section"><label class="check-label"><input type="checkbox" id="${prefix}-query-enabled" data-query-toggle ${hook.send_query_params ? 'checked' : ''}>${type==='manual' ? 'Send arguments' : 'Send DAQ arguments'}</label><div ${hook.send_query_params ? '' : 'hidden'}><label>Send as<select class="input" id="${prefix}-argument-transport"><option value="query" ${hook.argument_transport!=='json' ? 'selected' : ''}>Query parameters</option>${type==='monitor' ? '' : `<option value="json" ${hook.argument_transport==='json' ? 'selected' : ''}>JSON body</option>`}</select></label><p class="form-note">${type==='monitor' ? 'GET query parameters use the latest cached DAQ values. JSON objects are sent as JSON strings. No additional DAQ requests are made.' : 'Values are read immediately before this API runs. Run number is the current DAQ value, without padding. Use JSON body for getconfig and history objects.'}</p>${(hook.query_params || []).map((argument,n)=>`<div class="actions section"><label>Argument name<input class="input" id="${prefix}-arg-${n}-name" maxlength="64" value="${html(argument.name)}" placeholder="run_number"></label><label>Value source<select class="input" data-argument-source data-kind="${type}" data-index="${index}" id="${prefix}-arg-${n}-source">${Object.entries(sources).map(([key,label])=>`<option value="${key}" ${argument.source===key ? 'selected' : ''}>${label}</option>`).join('')}</select></label><button type="button" class="button small" data-query-remove="${n}" data-kind="${type}" data-index="${index}">×</button></div>${type==='manual' && argument.source==='custom' ? field('Input template (placeholder only)',`${prefix}-arg-${n}-placeholder`,argument.placeholder || '', 'maxlength="1000"') : ''}<p class="form-note argument-description">${html(argumentDescription(argument.source))}</p>`).join('')}<button type="button" class="button small section" data-query-add data-kind="${type}" data-index="${index}">＋ Add argument</button></div></div>`;
+    return `<div class="section"><label class="check-label"><input type="checkbox" id="${prefix}-query-enabled" data-query-toggle ${hook.send_query_params ? 'checked' : ''}>${type==='manual' ? 'Send arguments' : 'Send DAQ arguments'}</label><div ${hook.send_query_params ? '' : 'hidden'}><label>Send as<select class="input" id="${prefix}-argument-transport"><option value="query" ${hook.argument_transport!=='json' ? 'selected' : ''}>Query parameters</option>${type==='monitor' ? '' : `<option value="json" ${hook.argument_transport==='json' ? 'selected' : ''}>JSON body</option>`}</select></label><p class="form-note">${type==='monitor' ? 'GET query parameters use the latest cached DAQ values. JSON objects are sent as JSON strings. No additional DAQ requests are made.' : 'Arguments use the shared Run overview snapshot; Start/Stop hooks use their verified transition snapshot. Run numbers are not padded. JSON body keeps JSON object types.'}</p>${(hook.query_params || []).map((argument,n)=>`<div class="actions section"><label>Argument name<input class="input" id="${prefix}-arg-${n}-name" maxlength="64" value="${html(argument.name)}" placeholder="run_number"></label><label>Value source<select class="input" data-argument-source data-kind="${type}" data-index="${index}" id="${prefix}-arg-${n}-source">${Object.entries(sources).map(([key,label])=>`<option value="${key}" ${argument.source===key ? 'selected' : ''}>${label}</option>`).join('')}</select></label><button type="button" class="button small" data-query-remove="${n}" data-kind="${type}" data-index="${index}">×</button></div>${type==='manual' && argument.source==='custom' ? field('Input template (placeholder only)',`${prefix}-arg-${n}-placeholder`,argument.placeholder || '', 'maxlength="1000"') : ''}<p class="form-note argument-description">${html(argumentDescription(argument.source))}</p>`).join('')}<button type="button" class="button small section" data-query-add data-kind="${type}" data-index="${index}">＋ Add argument</button></div></div>`;
   }
   function renderHooks(type) {
     return config[type+"_api"].map((hook,index,array) => `<details class="hook-row" data-hook="${type}" data-config-section="hook-${type}-${index}" ${configSections.get(`hook-${type}-${index}`) ? 'open' : ''}><summary><span>${html(hook.name || 'New API')}</span><span class="small-text muted">${hook.enabled===false ? 'Disabled' : 'Enabled'}</span></summary><div class="hook-content">

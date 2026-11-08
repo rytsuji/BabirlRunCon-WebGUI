@@ -35,14 +35,18 @@ function mountWebutil(context) {
   function collect(root) {
     return Object.fromEntries([...root.querySelectorAll("[data-field]")].map(el => [el.dataset.field,el.type==="checkbox" ? el.checked : el.type==="number" ? Number(el.value) : el.value]));
   }
-  async function read(kind,efn) {
-    return api(base+"/webutil/"+kind+(efn==null ? "" : "?efn="+efn));
+  async function read(kind,efn,refresh=false) {
+    const params=new URLSearchParams();if(efn!=null)params.set("efn",efn);if(refresh)params.set("refresh","true");
+    return api(base+"/webutil/"+kind+(params.size ? "?"+params : ""));
   }
   async function save(kind,payload,efn) {
     if (!await confirmAction("Set DAQ configuration?",`Write ${kind === "es" ? "ES "+efn : kind} and verify readback? DAQ must be idle.`,"Set & verify")) return;
     const result = await api(base+"/webutil",{method:"PUT",body:{kind,payload,...(efn==null ? {} : {efn})}});
     if (!context.isLive()) return;
-    if (["eflist","hdlist","ssm"].includes(kind)) await load(kind);
+    if (["eflist","hdlist","ssm"].includes(kind)) {
+      if(result.after?.runinfo){rawConfig=result.after;loaded.add(kind);if(kind==='eflist')renderEF();else if(kind==='hdlist')renderHD();else renderSSM();}
+      else await load(kind,true);
+    }
     toast("Settings written, verified and reloaded");
     const note = view(tab).querySelector(".utility-result");
     if (note) note.innerHTML = `<details open><summary>Verified changes · Current / Previous</summary>${formatConfigChanges(result.after ?? result.es_config,result.before,kind,result.es_config,result.before_es)}</details>`;
@@ -96,7 +100,7 @@ function mountWebutil(context) {
       if(rows.some(row=>normalizeEFMode(row.mode)===null))throw new Error("Select a valid Mode for every EF before saving.");
       await save("eflist",{rows});
     });
-    get("#ef-refresh").onclick=guarded(()=>load("eflist"));
+    get("#ef-refresh").onclick=guarded(()=>load("eflist",true));
     get("#ef-check").onclick=guarded(async()=>{
       const result=await context.checkConnections();
       view(tab).querySelector(".utility-result").innerHTML=`<div class="utility-readback">${formatDAQ(result)}</div>`;
@@ -120,7 +124,7 @@ function mountWebutil(context) {
     const data=rawConfig.ssminfo || {};
     view("ssm").innerHTML=panel("babissm · setssminfo",`<form id="ssm-form"><div class="field">${check("enabled",enabled(data.onoff),"Enable start / stop manager")}</div><div class="utility-form-grid">${field("SSM host",input("host",data.host || "","text",'maxlength="79"'))}${field("Start command / path",input("start",data.start || "","text",'maxlength="79"'))}${field("Stop command / path",input("stop",data.stop || "","text",'maxlength="79"'))}</div><p class="form-note">These are babild's SSM settings. Saving them does not execute the commands.</p><div class="actions section"><button class="button blue settings-write" type="submit">Set SSM Configuration</button></div></form><div class="utility-result section"></div>`, '<button class="button small" id="ssm-refresh">↻ Read SSM settings</button>');
     get("#ssm-form").onsubmit=guarded(()=>save("ssm",collect(get("#ssm-form"))));
-    get("#ssm-refresh").onclick=guarded(()=>load("ssm"));updateStatus(status);
+    get("#ssm-refresh").onclick=guarded(()=>load("ssm",true));updateStatus(status);
   }
   function hdRow(row={}) {
     return `<tr><td>${input("hdn",row.hdn ?? 0,"number",'min="0" max="9" required')}</td><td>${check("enabled",enabled(row.onoff ?? row.enabled),"ON")}</td><td>${input("path",row.path || "","text",'maxlength="79" required')}</td><td class="muted">${esc(row.free || "—")}</td><td><button type="button" class="button small" data-remove>×</button></td></tr>`;
@@ -135,10 +139,10 @@ function mountWebutil(context) {
       get("#hd-rows").insertAdjacentHTML("beforeend",hdRow({hdn:next,enabled:true}));wireRows(view("hdlist"));
     };
     get("#hd-form").onsubmit=guarded(()=>save("hdlist",{rows:[...get("#hd-rows").rows].map(collect)}));
-    get("#hd-refresh").onclick=guarded(()=>load("hdlist"));updateStatus(status);
+    get("#hd-refresh").onclick=guarded(()=>load("hdlist",true));updateStatus(status);
   }
-  async function load(id) {
-    rawConfig=await read("config");if(!context.isLive())return;
+  async function load(id,refresh=false) {
+    rawConfig=await read("config",null,refresh);if(!context.isLive())return;
     loaded.add(id);
     if(id==="eflist")renderEF();else if(id==="ssm")renderSSM();else renderHD();
   }

@@ -36,7 +36,10 @@ and edited through **Edit configuration**.
 
 Monitor APIs use GET and update their latest result only while the Run Control
 tab is visible. Configure their interval, timeout and timing in Edit configuration.
-Use Send DAQ arguments to pass cached DAQ values, getconfig or Run history as
+They also refresh after Start, NSSTA and Stop transitions. If a request is already
+pending, one refresh is queued. DAQ arguments wait for the first Run overview data
+and then use its shared snapshot.
+Use Send DAQ arguments to pass shared Run overview values, getconfig or Run history as
 query parameters to a Monitor API. JSON objects are encoded as JSON strings.
 Uncheck Enabled to pause additional APIs while keeping their settings.
 The Run Control API is always enabled.
@@ -61,6 +64,12 @@ Uncheck Enabled in the configuration to prevent an API from running.
 
 If the API requires a token, set its environment variable before starting the
 GUI and enter that variable name in the API settings.
+
+Monitor and Every time manual API arguments use the shared Run overview values.
+Start/Stop API arguments use the snapshot verified for that transition.
+EF List, HD List and babissm tabs reuse the shared snapshot for display; use their
+Refresh buttons to read the latest DAQ settings. Writes always check the live DAQ
+state and verify their results.
 
 In **Edit configuration**, expand the **APIs** groups to edit individual APIs.
 Add a **History comment** before Save to keep a commented snapshot, including when
