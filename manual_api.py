@@ -8,7 +8,7 @@ from controllers import auth_headers
 from storage import now
 
 
-async def execute_manual(client, endpoint, arguments, request, state, store, eid):
+async def execute_manual(client, endpoint, arguments, request, state, store, eid, watch_disconnect=True):
     async def execute():
         values = {}
         if endpoint.send_query_params:
@@ -44,6 +44,8 @@ async def execute_manual(client, endpoint, arguments, request, state, store, eid
             return {'success':response.is_success,'http_status':response.status_code,'data':data}
 
     async def disconnected():
+        if not watch_disconnect:
+            await asyncio.Future()
         while not await request.is_disconnected():
             await asyncio.sleep(.1)
 

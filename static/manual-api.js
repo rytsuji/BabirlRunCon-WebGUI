@@ -9,48 +9,56 @@ function argumentDescription(source){
   return 'babirl: '+({runname:'current Run name.',runnumber:'current Run number, without zero padding.',header:'Run header.',event_num:'current event count.',start_time:'Run start time, formatted by the Web GUI.',stop_time:'Run stop time, formatted by the Web GUI.'}[source] || 'current DAQ value.');
 }
 
-function mountManualAPIs({base,items,revision,getState,isLive}){
+function mountManualAPIs({base,items,revision,getState,isLive,onBusyChange=()=>{}}){
   const root=document.querySelector('#view-api');
-  root.innerHTML=`<div class="manual-api-layout"><section class="panel"><div class="panel-head"><h2>API controls</h2><a class="button small" href="${base.replace('/api/','/')}/edit">Edit configuration</a></div><div class="panel-body" id="manual-api-controls"></div></section><section class="panel"><div class="panel-head"><h2>API output</h2><span id="manual-api-result-name" class="small-text muted"></span></div><div class="panel-body"><p id="manual-api-result-status" class="form-note">Run an API to display its response.</p><pre id="manual-api-result" class="manual-api-output"></pre></div></section></div>`;
-  const controls=root.querySelector('#manual-api-controls');
-  controls.innerHTML=items.map((item,index)=>`<form class="manual-api-card" data-api-index="${index}"><div class="actions"><h3>${escapeHTML(item.name)}</h3>${pill(item.enabled ? 'ENABLED' : 'DISABLED',item.enabled ? 'green' : '')}</div><p class="form-note">${(item.timings || ['always']).map(value=>({always:'Every time',running:'During running',idle:'During IDLE'}[value])).join(' / ')}</p><p class="form-note mono wrap">${escapeHTML(item.method)} ${escapeHTML(item.api)}</p>${item.send_query_params ? item.query_params.map(argument=>argument.source==='custom' ? `<div class="field"><label>${escapeHTML(argument.name)}<input data-custom="${escapeHTML(argument.name)}" maxlength="65536" placeholder="${escapeHTML(argument.placeholder)}" ${item.enabled ? '' : 'disabled'}></label></div>` : `<p class="form-note"><strong>${escapeHTML(argument.name)}</strong> ← ${escapeHTML(DAQ_ARGUMENT_SOURCES[argument.source] || argument.source)}</p>`).join('') : ''}<button class="button primary small section" type="submit" ${item.enabled ? '' : 'disabled'}>Run API</button></form>`).join('') || '<p class="muted">No manual APIs configured. Add Manual APIs in Edit configuration.</p>';
-  let visible=false,generation=0;
-  const requests=new Set();
-  const output=root.querySelector('#manual-api-result');
-  const status=root.querySelector('#manual-api-result-status');
+  const timingsText=item=>(item.timings || ['always']).map(value=>({always:'Every time',running:'During running',idle:'During IDLE'}[value])).join(' / ');
+  root.innerHTML=items.map((item,index)=>`<section class="panel manual-api-panel" data-api-index="${index}">
+    <div class="panel-head"><div class="actions"><h2>${escapeHTML(item.name)}</h2>${pill(item.enabled ? 'ENABLED' : 'DISABLED',item.enabled ? 'green' : '')}</div><span class="small-text muted">${escapeHTML(timingsText(item))}</span></div>
+    <div class="manual-api-layout panel-body"><form class="manual-api-content" data-api-index="${index}"><h3>Content</h3><p class="form-note mono wrap">${escapeHTML(item.method)} ${escapeHTML(item.api)}</p>
+    ${item.send_query_params ? item.query_params.map((argument,n)=>`<div class="manual-query-row"><label for="manual-input-${index}-${n}">${escapeHTML(argument.name)}</label>${argument.source==='custom' ? `<input class="input" id="manual-input-${index}-${n}" data-custom="${escapeHTML(argument.name)}" maxlength="65536" placeholder="${escapeHTML(argument.placeholder)}" ${item.enabled ? '' : 'disabled'}>` : `<span class="form-note" id="manual-input-${index}-${n}">${escapeHTML(DAQ_ARGUMENT_SOURCES[argument.source] || argument.source)}</span>`}</div>`).join('') : ''}
+    <button class="button primary small section" type="submit" ${item.enabled ? '' : 'disabled'}>Run API</button></form>
+    <section class="manual-api-response"><h3>Output</h3><p class="manual-result-status form-note" role="status">Run this API to display its response.</p><pre class="manual-api-output"></pre></section></div></section>`).join('') || `<div class="panel panel-body"><p class="muted">No manual APIs configured.</p><a class="button small" href="${base.replace('/api/','/')}/edit">Edit configuration</a></div>`;
+  let visible=false,destroyed=false;
+  const requests=new Map();
+  const busy=()=>[...requests.values()].some(item=>!item.timings.includes('always'));
+  const notify=()=>{if(isLive() && root.isConnected)onBusyChange();};
   function allowed(item){
     const timings=item.timings || ['always'],snapshot=getState();
     const state=snapshot?.connected ? snapshot.state?.state : 'unknown';
-    return item.enabled && (timings.includes('always') || (timings.includes('running') && ['running','nssta'].includes(state)) || (timings.includes('idle') && state==='stopped'));
+    return item.enabled && (timings.includes('always') || (!snapshot?.active_operation && !snapshot?.manual_api_pending && !busy() &&
+      ((timings.includes('running') && ['running','nssta'].includes(state)) || (timings.includes('idle') && state==='stopped'))));
   }
   function update(){
-    controls.querySelectorAll('form').forEach(form=>{
+    root.querySelectorAll('form').forEach(form=>{
       const item=items[Number(form.dataset.apiIndex)],button=form.querySelector('button');
       button.disabled=form.dataset.pending==='true' || !allowed(item);
-      button.title=!item.enabled ? 'Disabled in Edit configuration' : !allowed(item) ? 'Unavailable in the current DAQ state' : '';
+      button.title=!item.enabled ? 'Disabled in Edit configuration' : !allowed(item) ? 'Unavailable in the current DAQ state, or another operation is pending' : '';
     });
   }
-  controls.querySelectorAll('form').forEach(form=>form.onsubmit=async event=>{
+  root.querySelectorAll('form').forEach(form=>form.onsubmit=async event=>{
     event.preventDefault();
     const index=Number(form.dataset.apiIndex),item=items[index],button=form.querySelector('button');
     if(!allowed(item) || button.disabled || !visible)return;
-    const signal=new AbortController(),epoch=generation;
-    requests.add(signal);form.dataset.pending="true";button.disabled=true;
-    root.querySelector('#manual-api-result-name').textContent=item.name;
-    status.textContent='Requesting…';status.className='form-note';output.textContent='';
+    const signal=new AbortController();
+    const panel=form.closest('[data-api-index].manual-api-panel');
+    const output=panel.querySelector('.manual-api-output'),status=panel.querySelector('.manual-result-status');
+    requests.set(signal,item);form.dataset.pending="true";update();notify();
+    status.textContent='Requesting…';status.className='manual-result-status form-note';output.textContent='';
     try{
       const arguments_=Object.fromEntries([...form.querySelectorAll('[data-custom]')].map(input=>[input.dataset.custom,input.value]));
       const result=await api(`${base}/manual/${index}`,{method:'POST',body:{revision,arguments:arguments_},signal:signal.signal});
-      if(!isLive() || !visible || epoch!==generation)return;
-      root.querySelector('#manual-api-result-name').textContent=item.name;
+      if(!isLive() || destroyed)return;
       status.textContent=(result.success ? 'Completed' : 'Failed')+(result.http_status ? ` · HTTP ${result.http_status}` : '')+` · ${formatTime(result.checked_at)}`;
-      status.className='form-note '+(result.success ? '' : 'error-text');
+      status.className='manual-result-status form-note '+(result.success ? '' : 'error-text');
       output.textContent=result.error || (typeof result.data==='string' ? result.data : JSON.stringify(result.data,null,2));
     }catch(error){
-      if(error.name!=='AbortError' && isLive() && visible && epoch===generation){status.textContent=error.message;status.className='form-note error-text';}
-    }finally{requests.delete(signal);form.dataset.pending="false";update();}
+      if(error.name!=='AbortError' && isLive() && !destroyed){status.textContent=error.message;status.className='manual-result-status form-note error-text';}
+    }finally{
+      requests.delete(signal);form.dataset.pending="false";
+      if(!destroyed){update();notify();}
+    }
   });
-  function stop(){generation++;if(requests.size){status.textContent="Request cancelled locally. Check the remote API before retrying.";status.className="form-note";}for(const request of requests)request.abort();requests.clear();}
+  function stop(){destroyed=true;for(const request of requests.keys())request.abort();requests.clear();}
   update();
-  return {activate(active){visible=active;if(!active)stop();update();},update,destroy:stop};
+  return {activate(active){visible=active;update();},update,busy,destroy:stop};
 }

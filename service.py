@@ -18,6 +18,7 @@ class ControlService:
         self.client = client
         self.settings = settings
         self.active = {}  # EB host -> operation; one backend process only.
+        self.manual_active = {}  # Conditional manual API request -> Run controls locked.
         self.tasks = set()
         self.task_by_op = {}
         self.monitor = None
@@ -27,6 +28,8 @@ class ControlService:
 
     def reserve(self, config, eid, action):
         key = self.key(config)
+        if key in self.manual_active:
+            raise HTTPException(409, "Waiting for a manual API response. Run controls are locked until completion or timeout.")
         if key in self.active:
             raise HTTPException(409, "Another operation is in progress on this EB.")
         op = {"id": uuid4().hex, "experiment_id": eid, "action": action,
@@ -283,7 +286,7 @@ class ControlService:
                 async def send_and_confirm():
                     # Always attempt Stop first; an unavailable snapshot must never block it.
                     try:
-                        receipt=await self.step(eid,op,'DAQ Stop',lambda:self.controller.stop(eid,config))
+                        receipt=await self.step(eid,op,'DAQ Stop',lambda:self.controller.stop(eid,config,ender=op['ender']) if op.get('ender') else self.controller.stop(eid,config))
                         # A Stop receipt alone cannot confirm the live DAQ state.
                         op['stop_receipt_verified']=receipt.get('verified') is True
                         self.persist(eid,op)

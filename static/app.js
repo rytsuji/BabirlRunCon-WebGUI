@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261107-api-11";
+const GUI_BUILD = "v1-20261108-ender-12";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -207,13 +207,14 @@ async function controlPage(eid, config, version, revision) {
         <div class="field-row"><div class="field"><label for="run-name">Run name</label><input id="run-name" autocomplete="off" placeholder="physics" maxlength="79"></div><div class="field"><label for="run-number">Current number</label><input id="run-number" type="number" min="0" max="2147483647" step="1"></div></div>
         <div class="actions apply-row"><button class="button small" id="apply-run" disabled>Set Run Name / Number</button><span class="form-note" id="draft-status">Current controller values</span></div>
         <div class="field header-field"><label for="run-header">Header</label><textarea id="run-header" maxlength="79" rows="2" placeholder="Describe this Run"></textarea><p class="form-note"><span id="header-bytes">0</span> / 79 bytes · blank keeps current header</p></div>
+        <div class="field ender-field"><label for="run-ender">Ender</label><textarea id="run-ender" maxlength="79" rows="1" placeholder="Comment saved when the Run stops"></textarea><p class="form-note"><span id="ender-bytes">0</span> / 79 bytes · sent with Stop · blank uses no ender</p></div>
         <p id="control-status" class="control-status" role="status"></p><div class="control-actions ${config.run_control_api.enable_nssta ? "" : "two-actions"}"><button class="button start-button" id="start" disabled>▶ Start</button><button class="button stop-button" id="stop" disabled>■ Stop</button>${config.run_control_api.enable_nssta ? `<button class="button nssta-button" id="nssta" disabled>▷ NSSTA</button>` : ""}</div>
         <p id="stop-wait" class="form-note mono" role="status" aria-live="polite" hidden></p>
         <div class="restart-row"><div><h3>Restart DAQ</h3><p id="restart-reason">Checking availability…</p></div><button class="button restart-button" id="restart" disabled>↻ Restart DAQ</button></div>
       </div></section>
       <section class="panel overview-panel"><div class="panel-head"><h2>Run overview</h2><div class="actions"><button class="button small" id="refresh-snapshot">↻ Refresh</button><span id="daq-state">${pill("CONNECTING")}</span></div></div><div class="panel-body">
         <div class="stat-grid"><div><div class="stat-label">RUN NAME</div><div class="stat-value" id="live-name">—</div></div><div><div class="stat-label">CURRENT NUMBER</div><div class="stat-value" id="live-number">—</div></div><div><div class="stat-label">EVENTS</div><div class="stat-value blue" id="live-events">—</div></div></div>
-        <dl class="detail-list"><dt>Header</dt><dd id="live-header">—</dd><dt>Start time</dt><dd id="live-start">—</dd><dt>Stop time</dt><dd id="live-stop">—</dd></dl>
+        <dl class="detail-list"><dt>Header</dt><dd id="live-header">—</dd><dt>Ender</dt><dd id="live-ender">—</dd><dt>Start time</dt><dd id="live-start">—</dd><dt>Stop time</dt><dd id="live-stop">—</dd></dl>
         <div id="es-counters" class="es-counters" aria-label="ES event counts"></div><div class="divider"></div><details id="config-details"><summary>DAQ configuration</summary><div id="live-config" class="daq-format">Waiting for DAQ…</div></details>
         <p id="acquisition-warning" class="form-note error-text" hidden></p>
       </div><div class="panel-foot small-text muted" id="last-checked">Values are read from the DAQ controller.</div></section>
@@ -239,7 +240,7 @@ async function controlPage(eid, config, version, revision) {
       const result=await api(base+"/connections/refresh",{method:"POST"});
       refreshRequested=true;poll();return result;
     }});
-  const manualAPIs=mountManualAPIs({base,items:config.manual_api || [],revision,getState:()=>current,isLive:()=>version===routeVersion});
+  const manualAPIs=mountManualAPIs({base,items:config.manual_api || [],revision,getState:()=>current,onBusyChange:()=>{controls();poll();},isLive:()=>version===routeVersion});
   const controlCleanup=pageCleanup;pageCleanup=()=>{manualAPIs.destroy();controlCleanup();};
   let selectedModule = "control";
   monitorContext();
@@ -285,18 +286,24 @@ async function controlPage(eid, config, version, revision) {
       header:$("#run-header").value,runname:$("#run-name").value,
       runnumber:$("#run-number").value,restartConfigured:config.restart_api.some(hook=>hook.enabled!==false) || ["babinfo","babild","babissm","babian"].some(name=>config.babimo?.[name])});
     $("#header-bytes").textContent = availability.bytes;
+    const manualLocked=manualAPIs.busy() || !!current?.manual_api_pending;
+    const lockReason=manualLocked ? "Waiting for a manual API response. Run controls are locked until completion or timeout." : "";
+    const enderBytes=new TextEncoder().encode($("#run-ender").value).length;
+    $("#ender-bytes").textContent=enderBytes;
+    const enderReason=enderBytes>79 || $("#run-ender").value.includes("\0") ? "Ender must be at most 79 UTF-8 bytes, without NUL." : "";
     for (const [id,reason] of [["start",availability.startReason],["nssta",availability.startReason],
       ["stop",availability.stopReason],["apply-run",availability.setReason],["restart",availability.restartReason]]) {
       const button = $("#" + id);
-      if (button) { button.disabled = !!reason; button.title = reason || "Ready"; }
+      if (button) { const blocked=lockReason || reason || (id==="stop" ? enderReason : "");button.disabled = !!blocked; button.title = blocked || "Ready"; }
     }
-    $("#restart-reason").textContent = availability.restartReason || "Ready · configured Restart APIs.";
-    $("#esconnect").disabled=pending || !!current?.active_operation || current?.state?.state!=='stopped' || !current?.connected || !!current?.eb_owner || current?.state?.target?.allow_writes===false;
-    for (const selector of ["#run-name","#run-number","#recall","#run-header"]) $(selector).disabled = !availability.editable;
+    $("#restart-reason").textContent = lockReason || availability.restartReason || "Ready · configured Restart APIs.";
+    $("#esconnect").disabled=manualLocked || pending || !!current?.active_operation || current?.state?.state!=='stopped' || !current?.connected || !!current?.eb_owner || current?.state?.target?.allow_writes===false;
+    for (const selector of ["#run-name","#run-number","#recall","#run-header"]) $(selector).disabled = manualLocked || !availability.editable;
     $("#draft-status").textContent = draftDirty ? "Edited · set before Start" : "Current controller values";
     $("#draft-status").style.color = draftDirty ? "var(--amber)" : "";
     const running = ["running","nssta"].includes(current?.state?.state);
-    const reason = running ? availability.stopReason : availability.startReason;
+    $("#run-ender").disabled=manualLocked || pending || !!current?.active_operation || current?.state?.target?.allow_writes===false;
+    const reason = lockReason || (running ? availability.stopReason || enderReason : availability.startReason);
     $("#control-status").textContent = reason || (running ? "Acquisition active · Stop is ready." : "Ready · start using the current controller name / number.");
     $("#control-status").classList.toggle("blocked", !!reason);
   }
@@ -305,6 +312,7 @@ async function controlPage(eid, config, version, revision) {
     draftDirty = $("#run-name").value !== current?.state?.runname || Number($("#run-number").value) !== current?.state?.runnumber;
     controls();
   });
+  $("#run-ender").addEventListener("input",controls);
   $("#run-header").addEventListener("input", () => { headerDirty = true; controls(); });
   $("#recall").onchange = () => {
     const memory = historyData.recall.runs[Number($("#recall").value)];
@@ -343,7 +351,7 @@ async function controlPage(eid, config, version, revision) {
       pending = true; controls();
       if(action==="stop"){clearStopWait();stopWaitStarted=performance.now();stopWaitId=null;updateStopWait();}
       try {
-        const accepted=await api(base+"/actions", {method:"POST",body:{action,header:$("#run-header").value,force_restart:action==="restart" && restartOverride}});
+        const accepted=await api(base+"/actions", {method:"POST",body:{action,header:$("#run-header").value,ender:action==="stop" ? $("#run-ender").value : "",force_restart:action==="restart" && restartOverride}});
         if(action==="stop"){
           stopWaitId=accepted.id;
           restartOverride=false;
@@ -470,7 +478,7 @@ async function controlPage(eid, config, version, revision) {
       $("#es-connection-list").innerHTML = es?.error ? `<p class="small-text muted">${html(es.error)}</p>` :
         (es?.items || []).map(item => `<div class="es-connection-item ${item.enabled ? "" : "muted"}"><span>ES ${html(item.efn)}</span><span title="${html(item.host)}"><span class="es-mode">${html(normalizeEFMode(item.onoff ?? item.mode) ?? (item.enabled ? "UNKNOWN" : "OFF"))}</span> ${html(item.name || item.host)}</span><span class="${!item.enabled ? 'muted' : item.connect===1 ? 'es-status-connected' : item.connect===0 ? 'es-status-disconnected' : 'es-status-unknown'}">${item.enabled ? (item.connect === 1 ? "● Connected" : item.connect === 0 ? "○ connect=0" : "? Unknown") : "OFF · excluded"}</span>${item.error ? `<span class="error-text">${html(item.error)}</span>` : ""}</div>`).join("") || '<span class="muted">No ES configured</span>';
       $("#daq-state").innerHTML = statusPill(state.state);
-      for (const [id,value] of [["live-name",state.runname],["live-number",runNumber(state.runnumber)],["live-events",state.event_num == null ? null : Number(state.event_num).toLocaleString()],["live-header",state.header],["live-start",formatTime(state.start_time)],["live-stop",formatTime(state.stop_time)]]) $("#"+id).textContent = value ?? "—";
+      for (const [id,value] of [["live-name",state.runname],["live-number",runNumber(state.runnumber)],["live-events",state.event_num == null ? null : Number(state.event_num).toLocaleString()],["live-header",state.header],["live-ender",state.ender || "—"],["live-start",formatTime(state.start_time)],["live-stop",formatTime(state.stop_time)]]) $("#"+id).textContent = value ?? "—";
       $("#live-config").innerHTML = formatDAQ(state.raw_config || {});
       $("#es-counters").innerHTML = formatESCounters(state.es_event_num,state.ef_info);
       $("#last-checked").textContent = `Snapshot ${formatTime(status.snapshot_at)} · counters ${formatTime(status.events_at)} · ${config.run_control_api.event_poll_interval_sec ?? 2}s`;

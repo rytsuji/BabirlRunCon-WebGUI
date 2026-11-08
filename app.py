@@ -23,7 +23,7 @@ from monitor import Monitor
 from service import ControlService
 from storage import Store, now
 
-BUILD_ID = "v1-20261107-api-11"
+BUILD_ID = "v1-20261108-ender-12"
 BASE = Path(__file__).resolve().parent
 
 
@@ -68,12 +68,15 @@ class RunEdit(Strict):
 class ActionRequest(Strict):
     action: Literal["start", "stop", "nssta", "restart"]
     header: str = Field(default="", max_length=4000)
+    ender: str = Field(default="", max_length=4000)
     force_restart: bool = False
 
     @model_validator(mode="after")
     def validate_header(self):
         if self.action in ("start", "nssta") and ("\x00" in self.header or len(self.header.encode()) > 79):
             raise ValueError("Header must contain at most 79 UTF-8 bytes without NUL; blank preserves the current header")
+        if self.action == 'stop' and ('\x00' in self.ender or len(self.ender.encode('utf-8'))>79):
+            raise ValueError('Ender must contain at most 79 UTF-8 bytes without NUL')
         return self
 
 
@@ -121,11 +124,14 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
     service = ControlService(store, adapter, client, settings)
     monitor = Monitor(adapter)
     service.monitor = monitor
+    manual_tasks=set()
 
     @asynccontextmanager
     async def lifespan(app):
         store.recover_operations()
         yield
+        for task in list(manual_tasks):task.cancel()
+        await asyncio.gather(*manual_tasks,return_exceptions=True)
         await service.close()
         if http_client is None:
             await client.aclose()
@@ -318,6 +324,7 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
                 'config_revision':config_revision,
                 "history_version": store.history_version(eid),
                 "checked_at": now(), "active_operation": service.active.get(service.key(config)),
+                "manual_api_pending":service.manual_active.get(service.key(config)),
                 "active_run": bool(store.active_run(eid)), "eb_owner": owner_of_eb(eid, config),
                 "control_errors":store.control_errors(eid),
                 "stop_recovery":service.stop_recovery(eid,config),"restart_unlocked":service.restart_unlocked(eid,config),
@@ -412,6 +419,8 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
     @app.post("/api/experiments/{eid}/actions", status_code=202)
     async def action(eid: str, request: ActionRequest):
         config, _, _ = config_for(eid)
+        if service.key(config) in service.manual_active:
+            raise HTTPException(409,'Waiting for a manual API response. Run controls are locked until completion or timeout.')
         if owner_of_eb(eid, config):
             raise HTTPException(409, "This EB is owned by another active experiment.")
         if request.action == "nssta" and not config.run_control_api.enable_nssta:
@@ -436,6 +445,7 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
                     await asyncio.gather(task,return_exceptions=True)
         op = service.reserve(config, eid, request.action)
         op['force_restart']=request.force_restart
+        if request.action=='stop':op['ender']=request.ender
         op['timeout_recovery']=bool(recovery and recovery.get('timeout_recovery'))
         if op['timeout_recovery']:op['recovery_timeout_sec']=recovery['minimum_stop_age_sec']
         try:
@@ -488,17 +498,46 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
         if not endpoint.enabled:raise HTTPException(409,'API is disabled')
         custom={item.name for item in endpoint.query_params if item.source=='custom'} if endpoint.send_query_params else set()
         if set(payload.arguments)-custom:raise HTTPException(422,'Unknown custom argument')
-        state={}
-        if 'always' not in endpoint.timings or (endpoint.send_query_params and any(item.source not in ('custom','run_history_json','current_run_json') for item in endpoint.query_params)):
-            try:state=await adapter.status(eid,config)
-            except Exception as exc:return {'success':False,'error':str(exc),'checked_at':now()}
-        if 'always' not in endpoint.timings:
-            phase='running' if state.get('state') in ('running','nssta') else 'idle' if state.get('state')=='stopped' else 'unknown'
-            if phase not in endpoint.timings:raise HTTPException(409,'API is not available in the current DAQ state')
-        try:result=await execute_manual(monitor_client,endpoint,payload.arguments,request,state,store,eid)
-        except asyncio.CancelledError:return JSONResponse({'success':False,'error':'Request cancelled'},status_code=499)
-        if config_for(eid)[2]!=revision:raise HTTPException(409,'Configuration changed. Response discarded.')
-        return result
+        key=service.key(config)
+        restricted='always' not in endpoint.timings
+        token={'name':endpoint.name,'experiment_id':eid,'started_at':now()}
+        if restricted:
+            if key in service.active or key in service.manual_active:
+                raise HTTPException(409,'Another DAQ operation or conditional API is in progress.')
+            service.manual_active[key]=token
+
+        async def run_manual():
+            try:
+                state={}
+                if restricted or (endpoint.send_query_params and any(item.source not in ('custom','run_history_json','current_run_json') for item in endpoint.query_params)):
+                    try:state=await adapter.status(eid,config)
+                    except Exception as exc:return {'success':False,'error':str(exc),'checked_at':now()}
+                if restricted:
+                    phase='running' if state.get('state') in ('running','nssta') else 'idle' if state.get('state')=='stopped' else 'unknown'
+                    if phase not in endpoint.timings:raise HTTPException(409,'API is not available in the current DAQ state')
+                result=await execute_manual(monitor_client,endpoint,payload.arguments,request,state,store,eid,watch_disconnect=not restricted)
+                if config_for(eid)[2]!=revision:raise HTTPException(409,'Configuration changed. Response discarded.')
+                return result
+            finally:
+                if restricted and service.manual_active.get(key) is token:
+                    service.manual_active.pop(key,None)
+
+        async def bounded_manual():
+            try:return await asyncio.wait_for(run_manual(),endpoint.timeout_sec)
+            except asyncio.TimeoutError:return {'success':False,'error':f'Timed out after {endpoint.timeout_sec:g} seconds','checked_at':now()}
+
+        task=asyncio.create_task(bounded_manual())
+        manual_tasks.add(task)
+        def finished(done):
+            manual_tasks.discard(done)
+            if restricted and service.manual_active.get(key) is token:service.manual_active.pop(key,None)
+            if not done.cancelled():done.exception()
+        task.add_done_callback(finished)
+        try:
+            # Keep the remote request and its lock alive through navigation/disconnect.
+            return await asyncio.shield(task) if restricted else await task
+        except asyncio.CancelledError:
+            return JSONResponse({'success':False,'error':'Request cancelled'},status_code=499)
 
     app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 

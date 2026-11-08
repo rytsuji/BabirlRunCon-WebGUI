@@ -62,12 +62,20 @@
 .config-editor .button.small{padding:3px 8px}
 .config-editor .editor-toolbar{padding:7px 10px}
 
-.manual-api-layout{display:grid;grid-template-columns:minmax(260px,1fr) minmax(0,1.2fr);gap:12px;align-items:start}
-.manual-api-card{border-bottom:1px solid var(--line);padding:0 0 14px;margin:0 0 14px}
-.manual-api-card:last-child{border:0;padding:0;margin:0}
-.manual-api-card .field{margin:10px 0}
-.manual-api-output{max-height:65vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;margin:10px 0 0}
-.argument-description{padding-left:3px;overflow-wrap:anywhere}
-@media(max-width:700px){.manual-api-layout{grid-template-columns:minmax(0,1fr)}}
 
-.manual-api-card .button.primary,.manual-api-card .button.primary:hover:not(:disabled){color:#fff}
+.manual-api-panel{margin-bottom:10px}
+.manual-api-panel .panel-head{padding:8px 12px}
+.manual-api-panel .panel-head h2{font-size:14px}
+.manual-api-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;padding:10px;align-items:stretch}
+.manual-api-content,.manual-api-response{border:1px solid var(--line);border-radius:5px;padding:10px;min-width:0}
+.manual-api-content h3,.manual-api-response h3{margin:0 0 5px}
+.manual-query-row{display:grid;grid-template-columns:160px minmax(0,1fr);align-items:center;gap:8px;margin-top:7px}
+.manual-query-row label{font-size:12px;font-weight:550;overflow-wrap:anywhere;line-height:1.4}
+.manual-query-row .input{padding:5px 8px;font-size:12px}
+.manual-query-row .form-note{margin:0;overflow-wrap:anywhere}
+.manual-api-output{max-height:300px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;margin:8px 0 0}
+.manual-api-panel .button.primary,.manual-api-panel .button.primary:hover:not(:disabled){color:#fff}
+.argument-description{padding-left:3px;overflow-wrap:anywhere}
+.run-settings-panel #run-ender{min-height:30px;height:30px;padding:4px 9px;font-size:12px;border-color:#aabddd;background:#fafcff}
+.run-settings-panel .ender-field{margin-bottom:5px}
+@media(max-width:700px){.manual-api-layout{grid-template-columns:minmax(0,1fr)}.manual-query-row{grid-template-columns:130px minmax(0,1fr)}}

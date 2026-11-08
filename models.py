@@ -170,6 +170,7 @@ class LiveState(Strict):
     runname: str
     runnumber: int = Field(ge=0)
     header: str = ""
+    ender: str = ""
     event_num: Optional[int] = None
     start_time: Optional[str] = None
     stop_time: Optional[str] = None

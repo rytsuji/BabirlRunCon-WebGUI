@@ -44,12 +44,19 @@ The Run Control API is always enabled.
 Use **Copy** in the experiment list to reuse settings. Enter a new name and,
 optionally, a URL path (ID). The description starts blank; Run history is not copied.
 
+Enter an **Ender** below Header before pressing Stop. It is sent with Stop and
+stored by babirl when closing a saved Run. Blank uses `no ender`.
+Header and Ender each accept at most 79 UTF-8 bytes.
+
 Register **Manual APIs** in Edit configuration, then run them from the **API** tab.
 Choose GET or POST, query parameters or a POST JSON body, and each argument's source.
 Choose availability with **Every time**, **During running** (including NSSTA), or
 **During IDLE**. The GUI and server check the DAQ state before execution.
+While a conditional API is pending, Run controls are locked until the response,
+failure or timeout. Switching tabs does not cancel the request or release the lock.
+Every time APIs do not lock Run controls.
 **Free input** creates an input in the API tab. Its template is a placeholder only;
-an empty input sends an empty string. The latest response appears to the right.
+an empty input sends an empty string. The latest response appears in the Output box beside that API.
 Uncheck Enabled in the configuration to prevent an API from running.
 
 If the API requires a token, set its environment variable before starting the

@@ -74,7 +74,7 @@ class HttpController:
         run = raw["runinfo"]
         # Missing/invalid mandatory fields must never become a default IDLE.
         state = {"state": {"IDLE": "stopped", "START": "running", "NSSTA": "nssta"}.get(run["runstatus"], "unknown"),
-                 "runname": run["runname"], "runnumber": run["runnumber"], "header": run.get("header", ""),
+                 "runname": run["runname"], "runnumber": run["runnumber"], "header": run.get("header", ""), "ender": run.get("ender", ""),
                  "start_time": daq_time(run,'start'), "stop_time": daq_time(run,'stop'),
                  "hdlist": raw.get("hdlist", []), "ef_info": raw.get("eflist", []),
                  "raw_config": raw, "acquisition_errors": {}, "event_num": None,
@@ -160,8 +160,8 @@ class HttpController:
         result = await self.request(config, "POST", "/api/v1/run/start", {"save": not nssta})
         return {"header_update": header_result, "start": result}
 
-    async def stop(self, eid, config):
-        return await self.request(config, "POST", "/api/v1/run/stop", {"ender": "completed"})
+    async def stop(self, eid, config, ender=""):
+        return await self.request(config, "POST", "/api/v1/run/stop", {"ender": ender})
 
 
 def auth_headers(endpoint, default_env=None):

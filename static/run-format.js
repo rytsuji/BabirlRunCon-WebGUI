@@ -12,7 +12,7 @@ function escapeRunHTML(value) {
 function formatDAQ(value, key = "") {
   const esc = escapeRunHTML;
   const labels = {runinfo:"Run",runnumber:"Run Number",runname:"Run Name",startdate:"Start Time",stopdate:"Stop Time",
-    runstatus:"DAQ State",eflist:"Event Senders",hdlist:"Storage",mtlist:"Tape Devices",ebinfo:"Event Builder",
+    runstatus:"DAQ State",ender:"Ender",eflist:"Event Senders",hdlist:"Storage",mtlist:"Tape Devices",ebinfo:"Event Builder",
     ssminfo:"SSM",efn:"ES Number",hdn:"Disk Number",onoff:"Enabled",evtn:"Events",es_event_num:"ES Events",
     event_num:"EB Events",daq_config:"DAQ Configuration",config_snapshot:"Experiment Configuration"};
   const label = text => esc(labels[text] || text.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()));
