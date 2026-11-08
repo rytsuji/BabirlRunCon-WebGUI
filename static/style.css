@@ -118,7 +118,7 @@
 
 /* Actions remain available while individual API settings are collapsed. */
 .config-editor .hook-entry{position:relative}
-.config-editor .hook-entry>.hook-row>summary{padding-right:175px;min-height:41px;overflow-wrap:anywhere}
+.config-editor .hook-entry>.hook-row>summary{padding-right:280px;min-height:41px;overflow-wrap:anywhere}
 .config-editor .hook-quick-actions{position:absolute;right:8px;top:7px;display:flex;align-items:center;gap:12px}
 .config-editor .hook-quick-actions .check-label{margin:0;white-space:nowrap}
 .config-editor .history-selection{margin-bottom:8px;gap:12px}
@@ -137,3 +137,6 @@
 .config-editor .hook-row[open]>summary{background:#fafbfd;border-bottom:1px solid #e1e6ee}
 .config-editor .hook-content{background:#fff}
 .config-editor .hook-entry:last-child>.hook-row{margin-bottom:0}
+
+.config-editor .hook-quick-actions .hook-order{gap:4px}
+@media(max-width:700px){.config-editor .hook-entry>.hook-row>summary{padding-right:10px;padding-bottom:40px}.config-editor .hook-quick-actions{top:36px;gap:8px}}
