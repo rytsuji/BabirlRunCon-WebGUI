@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261109-ui-18";
+const GUI_BUILD = "v1-20261109-timer-19";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -208,7 +208,8 @@ async function controlPage(eid, config, version, revision) {
         <div class="actions apply-row"><button class="button small" id="apply-run" disabled>Set Run Name / Number</button><span class="form-note" id="draft-status">Current controller values</span></div>
         <div class="field header-field"><label for="run-header">Header<span class="comment-bytes" id="header-limit"><span id="header-bytes">0</span> / 79 bytes</span></label><textarea id="run-header" aria-label="Header" aria-describedby="header-limit" maxlength="79" rows="2" placeholder="Describe this Run"></textarea></div>
         <div class="field ender-field"><label for="run-ender">Ender<span class="comment-bytes" id="ender-limit"><span id="ender-bytes">0</span> / 79 bytes</span></label><textarea id="run-ender" aria-label="Ender" aria-describedby="ender-limit" maxlength="79" rows="2" placeholder="Comment saved when the Run stops"></textarea></div>
-        <div class="control-actions ${config.run_control_api.enable_nssta ? "" : "two-actions"}"><button class="button start-button" id="start" disabled>▶ Start</button><button class="button stop-button" id="stop" disabled>■ Stop</button>${config.run_control_api.enable_nssta ? `<button class="button nssta-button" id="nssta" disabled>▷ NSSTA</button>` : ""}</div>
+        <div class="run-timer"><div class="timer-heading"><label class="check-label"><input type="checkbox" id="timer-enabled">Timer</label><span id="timer-status" class="small-text muted" role="status"></span></div><div id="timer-options" hidden><div class="timer-duration"><label>h<input class="input" id="timer-hours" type="number" min="0" max="8760" step="1" value="0"></label><label>min<input class="input" id="timer-minutes" type="number" min="0" max="59" step="1" value="1"></label><label>sec<input class="input" id="timer-seconds" type="number" min="0" max="59" step="1" value="0"></label><label class="check-label"><input type="checkbox" id="timer-repeat">Repeat</label></div><div id="timer-repeat-options" class="timer-repeat-options" hidden><label>Total Runs<input class="input" id="timer-count" type="number" min="1" max="1000000" step="1" value="2"></label><span id="timer-remaining" class="small-text muted">Remaining 2 / 2</span></div></div></div>
+        <div class="control-actions ${config.run_control_api.enable_nssta ? "" : "two-actions"}"><button class="button start-button" id="start" disabled>▶ Start</button><button class="button stop-button" id="stop" disabled>■ Stop</button>${config.run_control_api.enable_nssta ? `<button class="button nssta-button" id="nssta" disabled>▷ NSSTA</button>` : ""}<button class="button stop-button" id="manual-stop" hidden disabled>■ Manual Stop</button></div>
         <p id="stop-wait" class="form-note mono" role="status" aria-live="polite" hidden></p>
         <div class="restart-row"><div><h3>Restart DAQ</h3></div><button class="button restart-button" id="restart" disabled>↻ Restart DAQ</button></div>
       </div></section>
@@ -285,6 +286,8 @@ async function controlPage(eid, config, version, revision) {
   };
   $("#refresh-snapshot").onclick = () => { refreshRequested = true; poll(); };
 
+  const runTimer=mountRunTimer({root:app,base,request:api,onChange:controls});
+
   function controls() {
     const availability = daqControlState({status:current ? {...current,restart_unlocked:restartOverride || current.restart_unlocked} : {restart_unlocked:restartOverride},pending,draftDirty,
       header:$("#run-header").value,runname:$("#run-name").value,
@@ -300,11 +303,18 @@ async function controlPage(eid, config, version, revision) {
       const button = $("#" + id);
       if (button) { const blocked=lockReason || reason || (id==="stop" ? enderReason : "");button.disabled = !!blocked; button.title = blocked || "Ready"; }
     }
+    if(runTimer.active()){
+      for(const id of ['start','nssta','apply-run']){const button=$('#'+id);if(button)button.disabled=true;}
+      if(runTimer.finishRequested())$('#stop').disabled=true;
+      else if(runTimer.defersStop() && !$('#stop').disabled)$('#stop').title='Finish the current timed Run, then end repetition.';
+    }
+    $('#manual-stop').disabled=manualLocked || !!availability.stopReason || !!enderReason;
+    $('#manual-stop').title='Send Stop immediately and reset timer counts.';
     $("#esconnect").disabled=manualLocked || pending || !!current?.active_operation || current?.state?.state!=='stopped' || !current?.connected || !!current?.eb_owner || current?.state?.target?.allow_writes===false;
-    for (const selector of ["#run-name","#run-number","#recall","#run-header"]) $(selector).disabled = manualLocked || !availability.editable;
+    for (const selector of ["#run-name","#run-number","#recall","#run-header"]) $(selector).disabled = runTimer.active() || manualLocked || !availability.editable;
     $("#draft-status").textContent = draftDirty ? "Edited · set before Start" : "Current controller values";
     $("#draft-status").style.color = draftDirty ? "var(--amber)" : "";
-    $("#run-ender").disabled=manualLocked || pending || !!current?.active_operation || current?.state?.target?.allow_writes===false;
+    $("#run-ender").disabled=runTimer.active() || manualLocked || pending || !!current?.active_operation || current?.state?.target?.allow_writes===false;
   }
 
   for (const selector of ["#run-name","#run-number"]) $(selector).addEventListener("input", () => {
@@ -343,14 +353,20 @@ async function controlPage(eid, config, version, revision) {
     $("#stop-wait").textContent=`Stop sent · verifying DAQ / ES… ${elapsed} s / ${limit} s`;
     if(elapsed<limit)stopWaitTicker=setTimeout(updateStopWait,1000);
   }
-  for (const action of ["start","stop","nssta","restart"]) {
-    const button = $("#"+action); if (!button) continue;
-    button.onclick = async () => {
+  async function performAction(action,immediate=false) {
+      if(action==='stop' && !immediate && runTimer.defersStop()){
+        try{await runTimer.finish();}catch(error){toast(error.message,true);}
+        return;
+      }
+      let timerSpec=null;
+      if(['start','nssta'].includes(action)){
+        try{timerSpec=runTimer.spec();}catch(error){toast(error.message,true);return;}
+      }
       if (action === "restart" && !await confirmAction(restartOverride ? "Emergency Restart DAQ?" : "Restart DAQ?", restartOverride ? "Stop was not confirmed. Restart babinfo and babild, plus the selected processes and Restart APIs, even if acquisition is still running? The unfinished Run will be interrupted after DAQ is verified idle. Post-run APIs will not run." : "Restart the selected processes and configured Restart APIs? Any unfinished Run will be closed only after DAQ is verified idle.", "Restart DAQ")) return;
       pending = true; controls();
       if(action==="stop"){clearStopWait();stopWaitStarted=performance.now();stopWaitId=null;updateStopWait();}
       try {
-        const accepted=await api(base+"/actions", {method:"POST",body:{action,header:$("#run-header").value,ender:action==="stop" ? $("#run-ender").value : "",force_restart:action==="restart" && restartOverride}});
+        const accepted=await api(base+"/actions", {method:"POST",body:{action,header:$("#run-header").value,ender:action==="stop" || timerSpec ? $("#run-ender").value : "",...(timerSpec ? {timer:timerSpec} : {}),force_restart:action==="restart" && restartOverride}});
         if(action==="stop"){
           stopWaitId=accepted.id;
           restartOverride=false;
@@ -366,8 +382,11 @@ async function controlPage(eid, config, version, revision) {
         if (action === "start" || action === "nssta") headerDirty = false;
       } catch (error) { if(action==="stop")clearStopWait();toast(error.message,true); }
       finally { pending = false; await poll(); }
-    };
   }
+  for(const action of ["start","stop","nssta","restart"]){
+    const button=$("#"+action);if(button)button.onclick=()=>performAction(action);
+  }
+  $("#manual-stop").onclick=()=>performAction("stop",true);
 
   function renderOperation(op) {
     if (!op) return;
@@ -429,6 +448,7 @@ async function controlPage(eid, config, version, revision) {
         if(version!==routeVersion)return;
         monitorRevision=latest.revision;monitors.configure(latest.config.monitor_api,monitorRevision);
       }
+      runTimer.update(status.run_timer);
       current = status;historyData = hist; manualAPIs.update(); monitorContext(); restartOverride=!!status.restart_unlocked;
       const waiting=status.active_operation;
       if(waiting?.wait_started_at){

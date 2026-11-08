@@ -123,3 +123,16 @@
  .control-workspace>.monitor-panel{align-self:stretch;display:flex;flex-direction:column}
  .monitor-panel>.panel-body{flex:1;align-content:start}
 }
+
+.run-timer{border-top:1px solid var(--line);padding-top:7px;margin-top:8px}
+.timer-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px}
+.timer-heading .check-label{margin:0}
+#timer-status{font-size:10px;text-align:right}
+.timer-duration{display:flex;align-items:center;gap:8px}
+.timer-duration>label:not(.check-label),.timer-repeat-options>label{display:flex;align-items:center;gap:5px;font-size:11px}
+.timer-duration .input{width:62px;padding:4px 6px}
+.timer-duration .check-label{margin-left:auto;white-space:nowrap}
+.timer-repeat-options{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:5px}
+.timer-repeat-options .input{width:80px;padding:4px 6px}
+.control-page .control-actions.with-manual-stop{grid-template-columns:repeat(2,minmax(0,1fr))}
+.control-page #manual-stop{background:#fff;color:#a52930;border-color:#c43a40}

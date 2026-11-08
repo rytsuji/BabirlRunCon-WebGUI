@@ -51,6 +51,17 @@ Enter an **Ender** below Header before pressing Stop. It is sent with Stop and
 stored by babirl when closing a saved Run. Blank uses `no ender`.
 Header and Ender each accept at most 79 UTF-8 bytes.
 
+Enable **Timer** above the Run buttons and enter hours, minutes and seconds.
+Start with the normal **Start** or **NSSTA** button. Time is counted after DAQ
+start is confirmed. Enable **Repeat** and set **Total Runs**, including the first
+Run, to repeat the same mode after each normal Stop and its Stop APIs finish.
+During repetition, **Stop** finishes the current timed Run without starting another;
+**Manual Stop** sends Stop immediately and cancels repetition. Manual Stop, Restart
+DAQ and completion reset the count. DAQ errors stop automatic scheduling.
+Timer settings, Header and Ender are fixed while a timer is active.
+Timers continue across browser reloads and tab changes, but do not resume after
+the GUI server is restarted.
+
 Register **Manual APIs** in Edit configuration, then run them from the **API** tab.
 Choose GET or POST, query parameters or a POST JSON body, and each argument's source.
 Choose availability with **Every time**, **During running** (including NSSTA), or

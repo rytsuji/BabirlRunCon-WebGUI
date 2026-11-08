@@ -18,6 +18,7 @@ class ControlService:
         self.client = client
         self.settings = settings
         self.active = {}  # EB host -> operation; one backend process only.
+        self.timer_owners = {}
         self.manual_active = {}  # Conditional manual API request -> Run controls locked.
         self.tasks = set()
         self.task_by_op = {}
@@ -28,6 +29,8 @@ class ControlService:
 
     def reserve(self, config, eid, action):
         key = self.key(config)
+        if key in self.timer_owners and action not in ('start', 'nssta', 'stop', 'restart', 'connections'):
+            raise HTTPException(409, 'Run timer is active. Stop timed acquisition before changing DAQ settings.')
         if key in self.manual_active:
             raise HTTPException(409, "Waiting for a manual API response. Run controls are locked until completion or timeout.")
         if key in self.active:

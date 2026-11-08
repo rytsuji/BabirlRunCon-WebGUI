@@ -19,11 +19,12 @@ from controllers import HttpController
 from monitor_api import read_monitor
 from manual_api import execute_manual
 from models import Babimo, Experiment, ExperimentConfig, RunControlEndpoint, ServerConfig, Strict
+from run_timer import RunTimers
 from monitor import Monitor
 from service import ControlService
 from storage import Store, now
 
-BUILD_ID = "v1-20261109-ui-18"
+BUILD_ID = "v1-20261109-timer-19"
 BASE = Path(__file__).resolve().parent
 
 
@@ -82,17 +83,26 @@ class RunEdit(Strict):
         return value
 
 
+class RunTimerSpec(Strict):
+    duration_sec: int = Field(ge=1, le=31536000, strict=True)
+    repeat: bool = False
+    total_runs: int = Field(default=1, ge=1, le=1000000, strict=True)
+
+
 class ActionRequest(Strict):
     action: Literal["start", "stop", "nssta", "restart"]
     header: str = Field(default="", max_length=4000)
     ender: str = Field(default="", max_length=4000)
     force_restart: bool = False
+    timer: Optional[RunTimerSpec] = None
 
     @model_validator(mode="after")
     def validate_header(self):
+        if self.timer is not None and self.action not in ('start', 'nssta'):
+            raise ValueError('A timer can only be armed with Start or NSSTA')
         if self.action in ("start", "nssta") and ("\x00" in self.header or len(self.header.encode()) > 79):
             raise ValueError("Header must contain at most 79 UTF-8 bytes without NUL; blank preserves the current header")
-        if self.action == 'stop' and ('\x00' in self.ender or len(self.ender.encode('utf-8'))>79):
+        if (self.action == 'stop' or self.timer is not None) and ('\x00' in self.ender or len(self.ender.encode('utf-8'))>79):
             raise ValueError('Ender must contain at most 79 UTF-8 bytes without NUL')
         return self
 
@@ -141,6 +151,7 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
     service = ControlService(store, adapter, client, settings)
     monitor = Monitor(adapter)
     service.monitor = monitor
+    run_timers = RunTimers(service, monitor)
     manual_tasks=set()
 
     @asynccontextmanager
@@ -149,6 +160,7 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
         yield
         for task in list(manual_tasks):task.cancel()
         await asyncio.gather(*manual_tasks,return_exceptions=True)
+        await run_timers.close()
         await service.close()
         if http_client is None:
             await client.aclose()
@@ -158,6 +170,7 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
     app = FastAPI(title="DAQ Run Control", lifespan=lifespan)
     app.state.store = store
     app.state.service = service
+    app.state.run_timers = run_timers
 
     @app.middleware("http")
     async def same_origin(request: Request, call_next):
@@ -180,6 +193,9 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
             raise HTTPException(422, str(exc))
 
     def owner_of_eb(eid, config):
+        timer_owner = run_timers.owners.get(service.key(config))
+        if timer_owner and timer_owner['experiment_id'] != eid:
+            return timer_owner['experiment_id']
         for other in store.ids():
             if other == eid:
                 continue
@@ -266,7 +282,7 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
         config, _, revision = config_for(eid)
         if body.confirmation != eid or body.revision != revision:
             raise HTTPException(409, 'Confirm the experiment ID and reload the latest configuration.')
-        if service.key(config) in service.active or store.active_run(eid):
+        if service.key(config) in service.active or service.key(config) in run_timers.owners or store.active_run(eid):
             raise HTTPException(409, 'Resolve the active operation or unfinished Run first.')
         store.archive(eid)
         monitor.invalidate(eid)
@@ -357,6 +373,7 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
             observed = await monitor.read(eid, config, refresh)
         return {**observed,
                 'config_revision':config_revision,
+                "run_timer": run_timers.public(eid),
                 "history_version": store.history_version(eid),
                 "checked_at": now(), "active_operation": service.active.get(service.key(config)),
                 "manual_api_pending":service.manual_active.get(service.key(config)),
@@ -467,11 +484,23 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
 
     @app.post("/api/experiments/{eid}/actions", status_code=202)
     async def action(eid: str, request: ActionRequest):
+        return await submit_action(eid, request)
+
+    @app.post('/api/experiments/{eid}/timer/finish')
+    async def finish_timer(eid: str):
+        config_for(eid)
+        return run_timers.finish(eid)
+
+    async def submit_action(eid, request, automatic=False):
         config, _, _ = config_for(eid)
         if service.key(config) in service.manual_active:
             raise HTTPException(409,'Waiting for a manual API response. Run controls are locked until completion or timeout.')
         if owner_of_eb(eid, config):
             raise HTTPException(409, "This EB is owned by another active experiment.")
+        if not automatic and request.action in ('start', 'nssta') and service.key(config) in run_timers.owners:
+            raise HTTPException(409, 'A Run timer is already active on this EB.')
+        if not automatic and request.action in ('stop', 'restart'):
+            await run_timers.cancel(eid)
         if request.action == "nssta" and not config.run_control_api.enable_nssta:
             raise HTTPException(403, "NSSTA is disabled for this experiment.")
         if request.action == "restart" and not any(h.enabled for h in config.restart_api) and not config.babimo.selected():
@@ -503,6 +532,13 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
             elif request.action!='stop':
                 await service.check_state(eid, config,
                                           {"running", "nssta"} if request.action == "stop" else {"stopped"})
+        except asyncio.CancelledError:
+            if service.active.get(service.key(config)) is op:
+                service.active.pop(service.key(config), None)
+            op.update(status="failed", message="Operation cancelled before sending a DAQ command.", finished_at=now())
+            service.persist(eid, op)
+            monitor.invalidate(eid)
+            raise
         except Exception as exc:
             service.active.pop(service.key(config), None)
             op.update(status="failed", message=str(exc), finished_at=now())
@@ -516,8 +552,15 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
             store.clear_control_errors(eid)
             monitor.reset_recovery(eid)
         initial = copy.deepcopy(op)
+        if request.timer is not None:
+            run_timers.begin(eid, config, request.timer, request.action, request.header, request.ender, op)
         service.start_task(eid, config, op, request.header)
-        return initial
+        return op if automatic else initial
+
+    async def timer_submit(eid, action, header, ender):
+        return await submit_action(eid, ActionRequest(action=action, header=header, ender=ender), automatic=True)
+
+    run_timers.submit = timer_submit
 
     @app.get('/api/experiments/{eid}/stop-recovery')
     async def stop_recovery(eid:str):
