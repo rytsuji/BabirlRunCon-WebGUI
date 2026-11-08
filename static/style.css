@@ -76,7 +76,6 @@
 .manual-api-output{max-height:300px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;margin:8px 0 0}
 .manual-api-panel .button.primary,.manual-api-panel .button.primary:hover:not(:disabled){color:#fff}
 .argument-description{padding-left:3px;overflow-wrap:anywhere}
-.run-settings-panel #run-ender{min-height:30px;height:30px;padding:4px 9px;font-size:12px;border-color:#aabddd;background:#fafcff}
 .run-settings-panel .ender-field{margin-bottom:5px}
 @media(max-width:700px){.manual-api-layout{grid-template-columns:minmax(0,1fr)}.manual-query-row{grid-template-columns:130px minmax(0,1fr)}}
 

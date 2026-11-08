@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261108-shared-14";
+const GUI_BUILD = "v1-20261108-ui-15";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -206,11 +206,11 @@ async function controlPage(eid, config, version, revision) {
         <div class="field recall-field"><label for="recall">Recall saved Run</label><select id="recall"><option value="">Choose a saved Run name…</option></select></div>
         <div class="field-row"><div class="field"><label for="run-name">Run name</label><input id="run-name" autocomplete="off" placeholder="physics" maxlength="79"></div><div class="field"><label for="run-number">Current number</label><input id="run-number" type="number" min="0" max="2147483647" step="1"></div></div>
         <div class="actions apply-row"><button class="button small" id="apply-run" disabled>Set Run Name / Number</button><span class="form-note" id="draft-status">Current controller values</span></div>
-        <div class="field header-field"><label for="run-header">Header</label><textarea id="run-header" maxlength="79" rows="2" placeholder="Describe this Run"></textarea><p class="form-note"><span id="header-bytes">0</span> / 79 bytes · blank keeps current header</p></div>
-        <div class="field ender-field"><label for="run-ender">Ender</label><textarea id="run-ender" maxlength="79" rows="1" placeholder="Comment saved when the Run stops"></textarea><p class="form-note"><span id="ender-bytes">0</span> / 79 bytes · sent with Stop · blank uses no ender</p></div>
-        <p id="control-status" class="control-status" role="status"></p><div class="control-actions ${config.run_control_api.enable_nssta ? "" : "two-actions"}"><button class="button start-button" id="start" disabled>▶ Start</button><button class="button stop-button" id="stop" disabled>■ Stop</button>${config.run_control_api.enable_nssta ? `<button class="button nssta-button" id="nssta" disabled>▷ NSSTA</button>` : ""}</div>
+        <div class="field header-field"><label for="run-header">Header<span class="comment-bytes" id="header-limit"><span id="header-bytes">0</span> / 79 bytes</span></label><textarea id="run-header" aria-label="Header" aria-describedby="header-limit" maxlength="79" rows="2" placeholder="Describe this Run"></textarea></div>
+        <div class="field ender-field"><label for="run-ender">Ender<span class="comment-bytes" id="ender-limit"><span id="ender-bytes">0</span> / 79 bytes</span></label><textarea id="run-ender" aria-label="Ender" aria-describedby="ender-limit" maxlength="79" rows="2" placeholder="Comment saved when the Run stops"></textarea></div>
+        <div class="control-actions ${config.run_control_api.enable_nssta ? "" : "two-actions"}"><button class="button start-button" id="start" disabled>▶ Start</button><button class="button stop-button" id="stop" disabled>■ Stop</button>${config.run_control_api.enable_nssta ? `<button class="button nssta-button" id="nssta" disabled>▷ NSSTA</button>` : ""}</div>
         <p id="stop-wait" class="form-note mono" role="status" aria-live="polite" hidden></p>
-        <div class="restart-row"><div><h3>Restart DAQ</h3><p id="restart-reason">Checking availability…</p></div><button class="button restart-button" id="restart" disabled>↻ Restart DAQ</button></div>
+        <div class="restart-row"><div><h3>Restart DAQ</h3></div><button class="button restart-button" id="restart" disabled>↻ Restart DAQ</button></div>
       </div></section>
       <section class="panel overview-panel"><div class="panel-head"><h2>Run overview</h2><div class="actions"><button class="button small" id="refresh-snapshot">↻ Refresh</button><span id="daq-state">${pill("CONNECTING")}</span></div></div><div class="panel-body">
         <div class="stat-grid"><div><div class="stat-label">RUN NAME</div><div class="stat-value" id="live-name">—</div></div><div><div class="stat-label">CURRENT NUMBER</div><div class="stat-value" id="live-number">—</div></div><div><div class="stat-label">EVENTS</div><div class="stat-value blue" id="live-events">—</div></div></div>
@@ -300,16 +300,11 @@ async function controlPage(eid, config, version, revision) {
       const button = $("#" + id);
       if (button) { const blocked=lockReason || reason || (id==="stop" ? enderReason : "");button.disabled = !!blocked; button.title = blocked || "Ready"; }
     }
-    $("#restart-reason").textContent = lockReason || availability.restartReason || "Ready · configured Restart APIs.";
     $("#esconnect").disabled=manualLocked || pending || !!current?.active_operation || current?.state?.state!=='stopped' || !current?.connected || !!current?.eb_owner || current?.state?.target?.allow_writes===false;
     for (const selector of ["#run-name","#run-number","#recall","#run-header"]) $(selector).disabled = manualLocked || !availability.editable;
     $("#draft-status").textContent = draftDirty ? "Edited · set before Start" : "Current controller values";
     $("#draft-status").style.color = draftDirty ? "var(--amber)" : "";
-    const running = ["running","nssta"].includes(current?.state?.state);
     $("#run-ender").disabled=manualLocked || pending || !!current?.active_operation || current?.state?.target?.allow_writes===false;
-    const reason = lockReason || (running ? availability.stopReason || enderReason : availability.startReason);
-    $("#control-status").textContent = reason || (running ? "Acquisition active · Stop is ready." : "Ready · start using the current controller name / number.");
-    $("#control-status").classList.toggle("blocked", !!reason);
   }
 
   for (const selector of ["#run-name","#run-number"]) $(selector).addEventListener("input", () => {
