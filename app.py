@@ -23,7 +23,7 @@ from monitor import Monitor
 from service import ControlService
 from storage import Store, now
 
-BUILD_ID = "v1-20261108-ui-15"
+BUILD_ID = "v1-20261108-editor-16"
 BASE = Path(__file__).resolve().parent
 
 
@@ -56,6 +56,18 @@ class HistoryComment(Strict):
 class DeleteConfigHistory(Strict):
     confirmation: int = Field(ge=1,strict=True)
     revision: str
+
+
+class DeleteConfigHistoryBatch(Strict):
+    ids: list[int] = Field(min_length=1, max_length=10000)
+    revision: str
+
+    @field_validator('ids', mode='before')
+    @classmethod
+    def validate_ids(cls, value):
+        if not isinstance(value, list) or any(type(item) is not int or item < 1 for item in value):
+            raise ValueError('History IDs must be positive integers')
+        return list(dict.fromkeys(value))
 
 
 class RunEdit(Strict):
@@ -230,6 +242,15 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
         if not store.comment_config_edit(eid, edit_id, body.comment):
             raise HTTPException(404, 'Configuration revision not found.')
         return {'saved': True}
+
+    @app.post('/api/experiments/{eid}/config-history/delete')
+    async def delete_config_history_batch(eid: str, body: DeleteConfigHistoryBatch):
+        _, _, revision = config_for(eid)
+        if body.revision != revision:
+            raise HTTPException(409, 'Reload the latest configuration before deleting history.')
+        if not store.delete_config_edits(eid, body.ids):
+            raise HTTPException(404, 'Configuration revision not found. Reload history.')
+        return {'deleted': len(body.ids)}
 
     @app.delete('/api/experiments/{eid}/config-history/{edit_id}')
     async def delete_config_history(eid: str, edit_id: int, body: DeleteConfigHistory):

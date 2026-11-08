@@ -126,14 +126,20 @@ class Store:
             return db.execute("SELECT 1 FROM metadata WHERE key='config_history_initialized'").fetchone() is not None
 
     def delete_config_edit(self, eid, edit_id):
+        return self.delete_config_edits(eid, [edit_id])
+
+    def delete_config_edits(self, eid, edit_ids):
+        ids = set(edit_ids)
         with self.connect(eid) as db:
-            if db.execute('SELECT 1 FROM config_edits WHERE id=?', (edit_id,)).fetchone() is None:
+            existing = {row[0] for row in db.execute('SELECT id FROM config_edits')}
+            if not ids or not ids.issubset(existing):
                 return False
             last_id = db.execute('SELECT COALESCE(MAX(id),0) FROM config_edits').fetchone()[0]
             sequence = db.execute("SELECT value FROM metadata WHERE key='config_edit_sequence'").fetchone()
             db.execute("INSERT OR REPLACE INTO metadata VALUES ('config_edit_sequence',?)", (str(max(last_id,int(sequence[0]) if sequence else 0)),))
             db.execute("INSERT OR REPLACE INTO metadata VALUES ('config_history_initialized','1')")
-            return db.execute('DELETE FROM config_edits WHERE id=?', (edit_id,)).rowcount == 1
+            db.executemany('DELETE FROM config_edits WHERE id=?', [(edit_id,) for edit_id in ids])
+            return True
 
     def archive(self, eid):
         trash = self.root / '.trash'

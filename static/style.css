@@ -115,3 +115,25 @@
 
 .config-editor .hook-content label:has(>select){display:grid;grid-template-columns:175px minmax(0,1fr);gap:10px;align-items:center;font-size:12px}
 .config-editor .hook-content .actions>label:has(>select){grid-template-columns:100px minmax(0,1fr)}
+
+/* Actions remain available while individual API settings are collapsed. */
+.config-editor .hook-entry{position:relative}
+.config-editor .hook-entry>.hook-row>summary{padding-right:175px;min-height:41px;overflow-wrap:anywhere}
+.config-editor .hook-quick-actions{position:absolute;right:8px;top:7px;display:flex;align-items:center;gap:12px}
+.config-editor .hook-quick-actions .check-label{margin:0;white-space:nowrap}
+.config-editor .history-selection{margin-bottom:8px;gap:12px}
+.config-editor .history-entry{grid-template-columns:18px minmax(0,1fr) auto}
+.config-editor .history-select{margin:7px 0 0;accent-color:var(--blue)}
+@media(max-width:700px){.config-editor .history-entry{grid-template-columns:18px minmax(0,1fr)}.config-editor .history-entry-actions{grid-column:2}}
+
+/* Classification headers contrast with the API cards they contain. */
+.config-editor .api-settings-body{background:#f1f4f8;padding:0 10px 10px}
+.config-editor .api-config-group{border-color:#c5cedb;border-left:3px solid #7d91af;margin-top:10px;box-shadow:0 1px 2px #26334a08}
+.config-editor .api-config-group>summary{background:#e5ebf3;color:#25364d;font-weight:650;padding:10px 12px}
+.config-editor .api-config-group>summary .muted{color:#52637b}
+.config-editor .api-config-group>.panel-body{background:#f3f6fa;padding:10px}
+.config-editor .hook-row{background:#fff;border-color:#cbd4e1}
+.config-editor .hook-row>summary{background:#fff}
+.config-editor .hook-row[open]>summary{background:#fafbfd;border-bottom:1px solid #e1e6ee}
+.config-editor .hook-content{background:#fff}
+.config-editor .hook-entry:last-child>.hook-row{margin-bottom:0}

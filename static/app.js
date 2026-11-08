@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261108-ui-15";
+const GUI_BUILD = "v1-20261108-editor-16";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -553,13 +553,52 @@ async function editorPage(eid, data, version) {
     <div class="panel panel-body section"><div class="field"><label>Experiment URL</label><a class="mono wrap" href="${html(experimentURL)}" target="_blank" rel="noopener">${html(experimentURL)}</a><p class="form-note">Configured GUI port: ${html(data.server_port ?? location.port)}</p></div></div><div class="editor-layout"><aside class="editor-aside"><h3>Configuration</h3><p>Experiment</p><p>Event Builder</p><p>Run Control API</p><p>API hooks</p><div class="divider"></div><p>Saved to:</p><p class="mono">config/<br>experiment.yaml</p><p>Saving does not contact DAQ. Active operations and unfinished Run records must be resolved first. A backup is kept on save.</p></aside>
     <div class="editor-content"><div class="actions" style="justify-content:space-between"><button class="button small" id="metadata-lock" type="button">🔒 Unlock Experiment details</button><div class="editor-switch"><button id="mode-form" class="active" type="button">Form</button><button id="mode-yaml" type="button">YAML</button></div></div>
     <div id="editor-form"></div><div id="editor-yaml" class="field" hidden><label for="yaml-source">experiment.yaml</label><textarea id="yaml-source" class="yaml-editor" spellcheck="false"></textarea></div>
-    <section class="panel section"><div class="panel-head"><h2>Configuration history</h2><button class="button small" id="reload-edits">Reload history</button></div><div id="config-edits" class="panel-body"></div></section>
+    <section class="panel section"><div class="panel-head"><h2>Configuration history</h2><button class="button small" id="reload-edits">Reload history</button></div><div class="panel-body"><div class="actions history-selection"><label class="check-label"><input type="checkbox" id="select-all-edits">Select all</label><span class="small-text muted" id="selected-edits-count">0 selected</span><button type="button" class="button small danger" id="delete-selected-edits" disabled>Delete selected</button></div><div id="config-edits"></div></div></section>
     <div class="field section"><label for="edit-comment">History comment (optional)</label><input id="edit-comment" maxlength="1000" placeholder="Describe this configuration change"></div><div class="editor-toolbar"><span class="small-text muted" id="save-state">No unsaved changes</span><div class="actions"><a id="editor-back" class="button" href="/experiments/${encodeURIComponent(eid)}">Cancel &amp; Back to control</a><button id="discard-config" class="button danger" type="button" hidden>Discard changes</button><button id="save-config" class="button primary">Save</button></div></div></div></div>${footer()}`;
   $("#yaml-source").value = data.yaml;
+  let historyBusy=false;
+  const selectedEdits=new Set();
+  function updateHistorySelection(){
+    const boxes=[...$("#config-edits").querySelectorAll('[data-select-edit]')];
+    const all=$("#select-all-edits");
+    all.checked=boxes.length>0 && selectedEdits.size===boxes.length;
+    all.indeterminate=selectedEdits.size>0 && selectedEdits.size<boxes.length;
+    all.disabled=historyBusy || !boxes.length;
+    $("#selected-edits-count").textContent=`${selectedEdits.size} selected`;
+    $("#delete-selected-edits").disabled=historyBusy || !selectedEdits.size;
+    boxes.forEach(box=>{box.checked=selectedEdits.has(Number(box.dataset.selectEdit));box.disabled=historyBusy;});
+    $("#config-edits").querySelectorAll('[data-delete-edit]').forEach(button=>button.disabled=historyBusy);
+    $("#reload-edits").disabled=historyBusy;
+  }
+  $("#select-all-edits").onchange=()=>{
+    selectedEdits.clear();
+    if($("#select-all-edits").checked)$("#config-edits").querySelectorAll('[data-select-edit]').forEach(box=>selectedEdits.add(Number(box.dataset.selectEdit)));
+    updateHistorySelection();
+  };
+  async function deleteHistory(ids){
+    if(historyBusy || !ids.length)return;
+    historyBusy=true;updateHistorySelection();
+    try{
+      if(!await confirmAction("Delete configuration history?",`Permanently delete ${ids.length} selected history ${ids.length===1 ? 'entry' : 'entries'}? The current configuration and Run history will not change.`,"Delete history"))return;
+      await api(`/api/experiments/${encodeURIComponent(eid)}/config-history/delete`,{method:"POST",body:{ids,revision}});
+      ids.forEach(id=>selectedEdits.delete(id));
+      toast("Configuration history deleted");await loadEdits();
+    }catch(error){toast(error.message,true);}
+    finally{historyBusy=false;if(version===routeVersion)updateHistorySelection();}
+  }
+  $("#delete-selected-edits").onclick=()=>deleteHistory([...selectedEdits]);
   async function loadEdits(){
     const edits=await api(`/api/experiments/${encodeURIComponent(eid)}/config-history`);
     if(version!==routeVersion)return;
-    $("#config-edits").innerHTML=edits.map(edit=>`<div class="history-entry"><details><summary>${html(formatTime(edit.created_at))} · ${html(edit.action)}${edit.comment ? " · "+html(edit.comment) : ""}</summary><div class="history-entry-body"><div class="history-comment-row"><label for="history-comment-${edit.id}">History comment</label><input id="history-comment-${edit.id}" maxlength="1000" data-comment="${edit.id}" value="${html(edit.comment || "")}"><button class="button small" data-save-comment="${edit.id}">Save comment</button></div><pre class="history-yaml">${html(edit.yaml)}</pre></div></details><div class="actions history-entry-actions"><button class="button small" data-restore="${edit.id}">Restore this configuration</button><button class="button small danger" data-delete-edit="${edit.id}">Delete</button></div></div>`).join("") || '<p class="form-note">No configuration history.</p>';
+    $("#config-edits").innerHTML=edits.map(edit=>`<div class="history-entry"><input type="checkbox" class="history-select" data-select-edit="${edit.id}" aria-label="Select configuration history ${edit.id}"><details><summary>${html(formatTime(edit.created_at))} · ${html(edit.action)}${edit.comment ? " · "+html(edit.comment) : ""}</summary><div class="history-entry-body"><div class="history-comment-row"><label for="history-comment-${edit.id}">History comment</label><input id="history-comment-${edit.id}" maxlength="1000" data-comment="${edit.id}" value="${html(edit.comment || "")}"><button class="button small" data-save-comment="${edit.id}">Save comment</button></div><pre class="history-yaml">${html(edit.yaml)}</pre></div></details><div class="actions history-entry-actions"><button class="button small" data-restore="${edit.id}">Restore this configuration</button><button class="button small danger" data-delete-edit="${edit.id}">Delete</button></div></div>`).join("") || '<p class="form-note">No configuration history.</p>';
+    const availableIds=new Set(edits.map(edit=>edit.id));
+    for(const id of selectedEdits)if(!availableIds.has(id))selectedEdits.delete(id);
+    $("#config-edits").querySelectorAll('[data-select-edit]').forEach(box=>box.onchange=()=>{
+      const id=Number(box.dataset.selectEdit);
+      if(box.checked)selectedEdits.add(id);else selectedEdits.delete(id);
+      updateHistorySelection();
+    });
+    updateHistorySelection();
     $("#config-edits").querySelectorAll('[data-save-comment]').forEach(button=>button.onclick=async()=>{
       try{
         const id=button.dataset.saveComment;
@@ -584,16 +623,7 @@ async function editorPage(eid, data, version) {
         toast("Configuration restored and applied");await loadEdits();
       }catch(error){toast(error.message,true);}
     });
-    $("#config-edits").querySelectorAll('[data-delete-edit]').forEach(button=>button.onclick=async()=>{
-      try{
-        const id=Number(button.dataset.deleteEdit);
-        if(!await confirmAction("Delete configuration history?","Permanently delete this history entry? The current configuration and Run history will not change.","Delete history"))return;
-        button.disabled=true;
-        await api(`/api/experiments/${encodeURIComponent(eid)}/config-history/${id}`,{method:"DELETE",body:{confirmation:id,revision}});
-        toast("Configuration history deleted");await loadEdits();
-      }catch(error){toast(error.message,true);}
-      finally{if(button.isConnected)button.disabled=false;}
-    });
+    $("#config-edits").querySelectorAll('[data-delete-edit]').forEach(button=>button.onclick=()=>deleteHistory([Number(button.dataset.deleteEdit)]));
   }
   $("#reload-edits").onclick=()=>loadEdits().catch(error=>toast(error.message,true));
   loadEdits().catch(error=>toast(error.message,true));
@@ -655,13 +685,12 @@ async function editorPage(eid, data, version) {
     return `<div class="section"><label class="check-label"><input type="checkbox" id="${prefix}-query-enabled" data-query-toggle ${hook.send_query_params ? 'checked' : ''}>${type==='manual' ? 'Send arguments' : 'Send DAQ arguments'}</label><div ${hook.send_query_params ? '' : 'hidden'}><label>Send as<select class="input" id="${prefix}-argument-transport"><option value="query" ${hook.argument_transport!=='json' ? 'selected' : ''}>Query parameters</option>${type==='monitor' ? '' : `<option value="json" ${hook.argument_transport==='json' ? 'selected' : ''}>JSON body</option>`}</select></label><p class="form-note">${type==='monitor' ? 'GET query parameters use the latest cached DAQ values. JSON objects are sent as JSON strings. No additional DAQ requests are made.' : 'Arguments use the shared Run overview snapshot; Start/Stop hooks use their verified transition snapshot. Run numbers are not padded. JSON body keeps JSON object types.'}</p>${(hook.query_params || []).map((argument,n)=>`<div class="actions section"><label>Argument name<input class="input" id="${prefix}-arg-${n}-name" maxlength="64" value="${html(argument.name)}" placeholder="run_number"></label><label>Value source<select class="input" data-argument-source data-kind="${type}" data-index="${index}" id="${prefix}-arg-${n}-source">${Object.entries(sources).map(([key,label])=>`<option value="${key}" ${argument.source===key ? 'selected' : ''}>${label}</option>`).join('')}</select></label><button type="button" class="button small" data-query-remove="${n}" data-kind="${type}" data-index="${index}">×</button></div>${type==='manual' && argument.source==='custom' ? field('Input template (placeholder only)',`${prefix}-arg-${n}-placeholder`,argument.placeholder || '', 'maxlength="1000"') : ''}<p class="form-note argument-description">${html(argumentDescription(argument.source))}</p>`).join('')}<button type="button" class="button small section" data-query-add data-kind="${type}" data-index="${index}">＋ Add argument</button></div></div>`;
   }
   function renderHooks(type) {
-    return config[type+"_api"].map((hook,index,array) => `<details class="hook-row" data-hook="${type}" data-config-section="hook-${type}-${index}" ${configSections.get(`hook-${type}-${index}`) ? 'open' : ''}><summary><span>${html(hook.name || 'New API')}</span><span class="small-text muted">${hook.enabled===false ? 'Disabled' : 'Enabled'}</span></summary><div class="hook-content">
+    return config[type+"_api"].map((hook,index,array) => `<div class="hook-entry"><details class="hook-row" data-hook="${type}" data-config-section="hook-${type}-${index}" ${configSections.get(`hook-${type}-${index}`) ? 'open' : ''}><summary><span>${html(hook.name || 'New API')}</span></summary><div class="hook-content">
       <div class="two-columns">${field("Name",`hook-${type}-${index}-name`,hook.name)}${field("URL · full endpoint",`hook-${type}-${index}-api`,hook.api,'type="url"')}</div>
-      <label class="check-label"><input type="checkbox" id="hook-${type}-${index}-enabled" ${hook.enabled!==false ? 'checked' : ''}>Enabled</label>
       ${field("Token environment variable (optional)",`hook-${type}-${index}-token`,hook.token_env || "")}
       ${type==='manual' ? `<div class="section"><span class="small-text">Available</span><div class="actions">${Object.entries({always:'Every time',running:'During running',idle:'During IDLE'}).map(([key,label])=>`<label class="check-label"><input type="checkbox" data-manual-timing="${key}" data-index="${index}" id="manual-${index}-timing-${key}" ${(hook.timings || ['always']).includes(key) ? 'checked' : ''}>${label}</label>`).join('')}</div><p class="form-note">Every time includes unavailable DAQ states. During running includes NSSTA. During IDLE requires a confirmed stopped state.</p></div><div class="two-columns"><label>Method<select class="input" id="manual-${index}-method"><option ${hook.method==='GET' ? 'selected' : ''}>GET</option><option ${hook.method!=='GET' ? 'selected' : ''}>POST</option></select></label>${field('Timeout (seconds)',`manual-${index}-timeout`,hook.timeout_sec ?? 10,'type="number" min="1" max="3600"')}</div>` : ''}${type==='monitor' ? renderMonitorFields(index,hook)+renderQueryParams(type,index,hook) : type==='restart' ? '' : renderQueryParams(type,index,hook)}
       <div class="hook-row-actions">${!['restart','monitor','manual'].includes(type) ? `<label class="check-label"><input type="checkbox" id="hook-${type}-${index}-nssta" ${hook.run_on_nssta ? "checked" : ""}>Also run for NSSTA</label>` : `<span class="small-text muted">${type==='monitor' ? 'Scheduled GET · display only' : type==='manual' ? 'Run manually from the API tab' : 'Runs while DAQ is idle'}</span>`}
-      <div class="hook-order"><span>${index+1}</span><button class="button small" type="button" title="Move up" data-kind="${type}" data-index="${index}" data-move="-1" ${index === 0 ? "disabled" : ""}>↑</button><button class="button small" type="button" title="Move down" data-kind="${type}" data-index="${index}" data-move="1" ${index === array.length-1 ? "disabled" : ""}>↓</button><button class="button small" type="button" data-kind="${type}" data-remove="${index}" title="Remove API">×</button></div></div></div></details>`).join("") || `<p class="small-text muted" style="margin:0">No APIs configured. This step will be skipped.</p>`;
+      <div class="hook-order"><span>${index+1}</span><button class="button small" type="button" title="Move up" data-kind="${type}" data-index="${index}" data-move="-1" ${index === 0 ? "disabled" : ""}>↑</button><button class="button small" type="button" title="Move down" data-kind="${type}" data-index="${index}" data-move="1" ${index === array.length-1 ? "disabled" : ""}>↓</button></div></div></div></details><div class="hook-quick-actions"><label class="check-label"><input type="checkbox" id="hook-${type}-${index}-enabled" ${hook.enabled!==false ? 'checked' : ''}>Enabled</label><button class="button small danger" type="button" data-kind="${type}" data-remove="${index}" aria-label="Delete ${html(hook.name || 'API')}">Delete</button></div></div>`).join("") || `<p class="small-text muted" style="margin:0">No APIs configured. This step will be skipped.</p>`;
   }
   function renderMonitorFields(index,hook){
     return `<div class="two-columns">${field('Polling interval (seconds)',`monitor-${index}-interval`,hook.interval_sec ?? 5,'type="number" min="1" max="3600"')}${field('Timeout (seconds)',`monitor-${index}-timeout`,hook.timeout_sec ?? 10,'type="number" min="1" max="3600"')}</div><label>Timing<select class="input" id="monitor-${index}-timing">${Object.entries({always:'Every time',running:'During running',idle:'During IDLE'}).map(([key,label])=>`<option value="${key}" ${(hook.timing || 'always')===key ? 'selected' : ''}>${label}</option>`).join('')}</select></label><p class="form-note">GET · JSON · Display only. Failures never change DAQ state.</p>`;
