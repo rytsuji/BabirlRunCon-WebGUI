@@ -79,10 +79,15 @@ class Store:
 
     def record_config(self, eid, raw, action, comment=''):
         with self.connect(eid) as db:
+            db.execute("INSERT OR REPLACE INTO metadata VALUES ('config_history_initialized','1')")
             last = db.execute("SELECT yaml FROM config_edits ORDER BY id DESC LIMIT 1").fetchone()
             if last and last[0] == raw and not comment:
                 return
-            db.execute("INSERT INTO config_edits (created_at,action,yaml,comment) VALUES (?,?,?,?)", (now(), action, raw, comment))
+            last_id = db.execute('SELECT COALESCE(MAX(id),0) FROM config_edits').fetchone()[0]
+            sequence = db.execute("SELECT value FROM metadata WHERE key='config_edit_sequence'").fetchone()
+            next_id = max(last_id, int(sequence[0]) if sequence else 0) + 1
+            db.execute("INSERT OR REPLACE INTO metadata VALUES ('config_edit_sequence',?)", (str(next_id),))
+            db.execute("INSERT INTO config_edits (id,created_at,action,yaml,comment) VALUES (?,?,?,?,?)", (next_id, now(), action, raw, comment))
 
     def control_errors(self, eid):
         with self.connect(eid) as db:
@@ -115,6 +120,20 @@ class Store:
     def config_edits(self, eid):
         with self.connect(eid) as db:
             return [dict(row) for row in db.execute("SELECT * FROM config_edits ORDER BY id DESC")]
+
+    def config_history_initialized(self, eid):
+        with self.connect(eid) as db:
+            return db.execute("SELECT 1 FROM metadata WHERE key='config_history_initialized'").fetchone() is not None
+
+    def delete_config_edit(self, eid, edit_id):
+        with self.connect(eid) as db:
+            if db.execute('SELECT 1 FROM config_edits WHERE id=?', (edit_id,)).fetchone() is None:
+                return False
+            last_id = db.execute('SELECT COALESCE(MAX(id),0) FROM config_edits').fetchone()[0]
+            sequence = db.execute("SELECT value FROM metadata WHERE key='config_edit_sequence'").fetchone()
+            db.execute("INSERT OR REPLACE INTO metadata VALUES ('config_edit_sequence',?)", (str(max(last_id,int(sequence[0]) if sequence else 0)),))
+            db.execute("INSERT OR REPLACE INTO metadata VALUES ('config_history_initialized','1')")
+            return db.execute('DELETE FROM config_edits WHERE id=?', (edit_id,)).rowcount == 1
 
     def archive(self, eid):
         trash = self.root / '.trash'

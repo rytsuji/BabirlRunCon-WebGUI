@@ -23,7 +23,7 @@ from monitor import Monitor
 from service import ControlService
 from storage import Store, now
 
-BUILD_ID = "v1-20261108-ender-12"
+BUILD_ID = "v1-20261108-history-13"
 BASE = Path(__file__).resolve().parent
 
 
@@ -51,6 +51,11 @@ class NewExperimentConfig(ExperimentConfig):
 
 class HistoryComment(Strict):
     comment: str = Field(max_length=1000)
+
+
+class DeleteConfigHistory(Strict):
+    confirmation: int = Field(ge=1,strict=True)
+    revision: str
 
 
 class RunEdit(Strict):
@@ -215,7 +220,7 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
     @app.get('/api/experiments/{eid}/config-history')
     async def config_history(eid: str):
         _, raw, _ = config_for(eid)
-        if not store.config_edits(eid):
+        if not store.config_edits(eid) and not store.config_history_initialized(eid):
             store.record_config(eid, raw, 'import')
         return store.config_edits(eid)
 
@@ -225,6 +230,15 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
         if not store.comment_config_edit(eid, edit_id, body.comment):
             raise HTTPException(404, 'Configuration revision not found.')
         return {'saved': True}
+
+    @app.delete('/api/experiments/{eid}/config-history/{edit_id}')
+    async def delete_config_history(eid: str, edit_id: int, body: DeleteConfigHistory):
+        _,_,revision=config_for(eid)
+        if body.confirmation!=edit_id or body.revision!=revision:
+            raise HTTPException(409,'Confirm the history entry and reload the latest configuration.')
+        if not store.delete_config_edit(eid,edit_id):
+            raise HTTPException(404,'Configuration revision not found.')
+        return {'deleted': True}
 
     @app.delete('/api/experiments/{eid}')
     async def delete_experiment(eid: str, body: DeleteExperiment):

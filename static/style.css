@@ -79,3 +79,40 @@
 .run-settings-panel #run-ender{min-height:30px;height:30px;padding:4px 9px;font-size:12px;border-color:#aabddd;background:#fafcff}
 .run-settings-panel .ender-field{margin-bottom:5px}
 @media(max-width:700px){.manual-api-layout{grid-template-columns:minmax(0,1fr)}.manual-query-row{grid-template-columns:130px minmax(0,1fr)}}
+
+/* Compact, grouped configuration forms and history actions. */
+.config-editor .api-settings-body{padding:0 8px 8px}
+.config-editor .api-config-group{border:1px solid var(--line);border-radius:5px;margin-top:7px;background:#fff;overflow:hidden}
+.config-editor .api-config-group>summary,.config-editor .hook-row>summary{padding:8px 10px;font-size:12px;font-weight:600;color:#303741;list-style:none;display:flex;align-items:center;gap:8px}
+.config-editor .api-config-group>summary::before,.config-editor .hook-row>summary::before{content:"▸";flex-shrink:0}
+.config-editor .api-config-group[open]>summary::before,.config-editor .hook-row[open]>summary::before{content:"▾"}
+.config-editor .api-config-group>summary .muted,.config-editor .hook-row>summary .muted{margin-left:auto}
+.config-editor .api-config-group[open]>summary{border-bottom:1px solid var(--line)}
+.config-editor .api-add-row{justify-content:flex-end;margin-bottom:7px}
+.config-editor details.hook-row{padding:0;margin-bottom:6px}
+.config-editor .hook-content{padding:8px}
+.config-editor .field{display:grid;grid-template-columns:175px minmax(0,1fr);gap:3px 10px;align-items:center}
+.config-editor .field>label{margin:0;overflow-wrap:anywhere}
+.config-editor .field>input,.config-editor .field>textarea,.config-editor .field>select,.config-editor .field>a{grid-column:2;min-width:0}
+.config-editor .field>.form-note{grid-column:2;margin-top:0}
+.config-editor .two-columns .field{grid-template-columns:105px minmax(0,1fr)}
+.config-editor .config-api-fields{grid-template-columns:minmax(0,1fr)}
+.config-editor .config-api-fields>.field{grid-template-columns:235px minmax(0,1fr)}
+.config-editor .hook-content>label:has(>select),.config-editor .hook-content .two-columns>label:has(>select){display:grid;grid-template-columns:105px minmax(0,1fr);gap:10px;align-items:center}
+.config-editor .hook-content .actions>label:has(>input),.config-editor .hook-content .actions>label:has(>select){display:grid;grid-template-columns:100px minmax(0,1fr);gap:8px;flex:1 1 270px;align-items:center;font-size:12px}
+.config-editor .hook-content .actions>label.check-label{display:flex}
+.config-editor .history-entry{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start;border-bottom:1px solid var(--line);padding:8px 0}
+.config-editor .history-entry:last-child{border:0}
+.config-editor .history-entry>details{min-width:0}
+.config-editor .history-entry summary{padding:4px 0;overflow-wrap:anywhere}
+.config-editor .history-entry-actions{gap:5px;justify-content:flex-end}
+.config-editor .history-entry-body{padding:8px 0 0}
+.config-editor .history-comment-row{display:grid;grid-template-columns:100px minmax(0,1fr) auto;gap:7px;align-items:center;font-size:12px}
+.config-editor .history-comment-row input{border:1px solid var(--line);border-radius:5px;min-width:0}
+.config-editor .history-yaml{min-height:0;max-height:260px;margin-top:8px;font-size:11px}
+.config-editor #editor-yaml{display:block}
+@media(max-width:700px){.config-editor .two-columns{grid-template-columns:minmax(0,1fr)}.config-editor .config-api-fields>.field,.config-editor .field{grid-template-columns:145px minmax(0,1fr)}.config-editor .history-entry{grid-template-columns:minmax(0,1fr)}.config-editor .history-entry-actions{justify-content:flex-start}.config-editor .history-comment-row{grid-template-columns:minmax(0,1fr) auto}.config-editor .history-comment-row label{grid-column:1/-1}}
+@media(max-width:420px){.config-editor .field,.config-editor .config-api-fields>.field{grid-template-columns:115px minmax(0,1fr)}}
+
+.config-editor .hook-content label:has(>select){display:grid;grid-template-columns:175px minmax(0,1fr);gap:10px;align-items:center;font-size:12px}
+.config-editor .hook-content .actions>label:has(>select){grid-template-columns:100px minmax(0,1fr)}

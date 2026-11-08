@@ -62,6 +62,12 @@ Uncheck Enabled in the configuration to prevent an API from running.
 If the API requires a token, set its environment variable before starting the
 GUI and enter that variable name in the API settings.
 
+In **Edit configuration**, expand the **APIs** groups to edit individual APIs.
+Add a **History comment** before Save to keep a commented snapshot, including when
+the configuration is unchanged. Restore a snapshot using **Restore this configuration**.
+**Delete** removes only the selected configuration history entry after confirmation;
+the current settings and Run history stay intact.
+
 Experiment settings and Run history are saved in `experiments/`. Keep that
 directory and your `server.yaml` when updating the GUI.
 
