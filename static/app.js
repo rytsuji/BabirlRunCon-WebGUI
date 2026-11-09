@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261109-comments-21";
+const GUI_BUILD = "v1-20261109-locks-22";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -367,6 +367,7 @@ async function controlPage(eid, config, version, revision) {
         try{timerSpec=runTimer.spec();}catch(error){toast(error.message,true);return;}
       }
       if (action === "restart" && !await confirmAction(restartOverride ? "Emergency Restart DAQ?" : "Restart DAQ?", restartOverride ? "Stop was not confirmed. Restart babinfo and babild, plus the selected processes and Restart APIs, even if acquisition is still running? The unfinished Run will be interrupted after DAQ is verified idle. Post-run APIs will not run." : "Restart the selected processes and configured Restart APIs? Any unfinished Run will be closed only after DAQ is verified idle.", "Restart DAQ")) return;
+      if(["start","nssta"].includes(action))runTimer.starting();
       pending = true; controls();
       if(action==="stop"){clearStopWait();stopWaitStarted=performance.now();stopWaitId=null;updateStopWait();}
       try {
@@ -452,7 +453,7 @@ async function controlPage(eid, config, version, revision) {
         if(version!==routeVersion)return;
         monitorRevision=latest.revision;monitors.configure(latest.config.monitor_api,monitorRevision);
       }
-      runTimer.update(status.run_timer);
+      runTimer.update(status.run_timer);runTimer.syncLocks(status);
       current = status;historyData = hist; manualAPIs.update(); monitorContext(); restartOverride=!!status.restart_unlocked;
       const waiting=status.active_operation;
       if(waiting?.wait_started_at){

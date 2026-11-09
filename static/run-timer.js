@@ -7,6 +7,11 @@ function mountRunTimer({root,base,request,onChange,onError}) {
   const fields=['#timer-hours','#timer-minutes','#timer-seconds','#timer-repeat','#timer-count'];
   const dirtyComments=new Set();
   let commentQueue={}, commentBusy=false;
+  let lockPhase='unknown', lockCycle=null, lastStartId=null, repeatVisible=false;
+  function setCommentEditable(value){
+    for(const name of ['header','ender'])get('#'+name+'-edit').checked=value;
+  }
+  setCommentEditable(true);
   const storageKey='babirl-run-timer:'+base;
   function savePreferences(){
     try{
@@ -27,11 +32,16 @@ function mountRunTimer({root,base,request,onChange,onError}) {
   }catch{}
   function render(){
     const active=!!state?.active;
+    const showLocks=enabled.checked && repeat.checked;
+    if(lockPhase==='idle')setCommentEditable(true);
+    else if(showLocks && !repeatVisible && lockPhase==='running')setCommentEditable(false);
+    repeatVisible=showLocks;
     get('#timer-options').hidden=!enabled.checked;
     get('#timer-repeat-options').hidden=!repeat.checked;
     get('#manual-stop').hidden=!(enabled.checked && repeat.checked);
     for(const name of ['header','ender']){
-      get('#'+name+'-lock-control').hidden=!(enabled.checked && repeat.checked);
+      get('#'+name+'-lock-control').hidden=!showLocks;
+      get('#'+name+'-edit').disabled=lockPhase==='idle';
       get('#'+name+'-lock-state').textContent=get('#'+name+'-edit').checked ? 'Editable' : 'Locked';
     }
     get('.control-actions').classList.toggle('with-manual-stop',enabled.checked && repeat.checked);
@@ -62,6 +72,22 @@ function mountRunTimer({root,base,request,onChange,onError}) {
   }
   for(const name of ['header','ender'])get('#'+name+'-edit').onchange=()=>{render();onChange();};
   return {
+    starting(){setCommentEditable(false);lockPhase='running';render();},
+    syncLocks(status){
+      const op=status?.active_operation;
+      const starting=op && ['start','nssta'].includes(op.action);
+      const timer=status?.run_timer;
+      const phase=status?.state?.state;
+      const cycle=timer?.active ? timer.id+':'+timer.completed_runs : null;
+      if(status?.connected && phase==='stopped' && !starting && !(timer?.active && timer.phase==='starting')){
+        lockPhase='idle';lockCycle=null;lastStartId=null;setCommentEditable(true);
+      }else if(starting || ['running','nssta'].includes(phase) || (timer?.active && timer.phase==='starting')){
+        if(lockPhase!=='running' || (cycle!==null && cycle!==lockCycle) || (starting && op.id!==lastStartId))setCommentEditable(false);
+        lockPhase='running';lockCycle=cycle;
+        if(starting)lastStartId=op.id;
+      }
+      render();
+    },
     changeComment(name,value){
       if(!state?.active)return;
       dirtyComments.add(name);

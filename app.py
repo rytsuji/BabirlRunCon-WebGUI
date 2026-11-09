@@ -24,7 +24,7 @@ from monitor import Monitor
 from service import ControlService
 from storage import Store, now
 
-BUILD_ID = "v1-20261109-comments-21"
+BUILD_ID = "v1-20261109-locks-22"
 BASE = Path(__file__).resolve().parent
 
 

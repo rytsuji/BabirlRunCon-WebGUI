@@ -59,7 +59,9 @@ During repetition, **Stop** finishes the current timed Run without starting anot
 **Manual Stop** sends Stop immediately and cancels repetition. Manual Stop, Restart
 DAQ and completion reset the count. DAQ errors stop automatic scheduling.
 Timer duration and repeat settings are fixed while a timer is active.
-In Repeat mode, use the switch beside Header or Ender to change **Locked** to
+Header/Ender switches appear only with Repeat enabled. They are **Editable** while
+IDLE, lock at each Start/NSSTA and unlock again when Stop completes.
+During acquisition, use the switch beside Header or Ender to change **Locked** to
 **Editable**. Header edits apply to the next Start; Ender edits apply to the next
 Stop, including the current Run when edited during acquisition. Valid edits are
 sent automatically. The current Run's Header is not changed.
