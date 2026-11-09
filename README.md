@@ -59,6 +59,9 @@ During repetition, **Stop** finishes the current timed Run without starting anot
 **Manual Stop** sends Stop immediately and cancels repetition. Manual Stop, Restart
 DAQ and completion reset the count. DAQ errors stop automatic scheduling.
 Timer settings, Header and Ender are fixed while a timer is active.
+Timer and Repeat switches, duration and total Runs are remembered per experiment
+in the current browser. Completed counts are shown in black and reset on completion
+or manual Stop/Restart.
 Timers continue across browser reloads and tab changes, but do not resume after
 the GUI server is restarted.
 
