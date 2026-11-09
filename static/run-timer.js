@@ -2,7 +2,7 @@
 
 function mountRunTimer({root,base,request,onChange,onError}) {
   const get=selector=>root.querySelector(selector);
-  let state=null, loadedId=null, ignoredId=null;
+  let state=null, loadedId=null, ignoredId=null, awaitingPlan=false;
   const enabled=get('#timer-enabled'), repeat=get('#timer-repeat');
   const fields=['#timer-hours','#timer-minutes','#timer-seconds','#timer-repeat','#timer-count'];
   const dirtyComments=new Set();
@@ -12,6 +12,14 @@ function mountRunTimer({root,base,request,onChange,onError}) {
     for(const name of ['header','ender'])get('#'+name+'-edit').checked=value;
   }
   setCommentEditable(true);
+  const enderStorageKey='babirl-ender:'+base;
+  function saveEnder(){
+    try{localStorage.setItem(enderStorageKey,get('#run-ender').value);}catch{}
+  }
+  try{
+    const saved=localStorage.getItem(enderStorageKey);
+    if(saved!==null)get('#run-ender').value=saved;
+  }catch{}
   const storageKey='babirl-run-timer:'+base;
   function savePreferences(){
     try{
@@ -59,7 +67,7 @@ function mountRunTimer({root,base,request,onChange,onError}) {
   });
   render();
   async function flushComments(){
-    if(commentBusy)return;
+    if(commentBusy || !state?.active)return;
     commentBusy=true;
     try{
       while(Object.keys(commentQueue).length){
@@ -72,7 +80,12 @@ function mountRunTimer({root,base,request,onChange,onError}) {
   }
   for(const name of ['header','ender'])get('#'+name+'-edit').onchange=()=>{render();onChange();};
   return {
-    starting(){setCommentEditable(false);lockPhase='running';render();},
+    starting(){
+      saveEnder();
+      awaitingPlan=enabled.checked;
+      dirtyComments.clear();commentQueue={};
+      setCommentEditable(false);lockPhase='running';render();
+    },
     syncLocks(status){
       const op=status?.active_operation;
       const starting=op && ['start','nssta'].includes(op.action);
@@ -89,7 +102,8 @@ function mountRunTimer({root,base,request,onChange,onError}) {
       render();
     },
     changeComment(name,value){
-      if(!state?.active)return;
+      if(name==='ender')saveEnder();
+      if(!state?.active && !awaitingPlan)return;
       dirtyComments.add(name);
       if(new TextEncoder().encode(value).length>79 || value.includes('\0'))return;
       commentQueue[name]=value;flushComments();
@@ -108,7 +122,8 @@ function mountRunTimer({root,base,request,onChange,onError}) {
       if(value && !value.active && value.id===ignoredId){state=null;render();return;}
       state=value;
       if(value?.active && value.id!==loadedId){
-        dirtyComments.clear();commentQueue={};
+        if(!awaitingPlan){dirtyComments.clear();commentQueue={};}
+        awaitingPlan=false;
         loadedId=value.id;enabled.checked=true;repeat.checked=value.repeat;
         get('#timer-hours').value=Math.floor(value.duration_sec/3600);
         get('#timer-minutes').value=Math.floor(value.duration_sec/60)%60;
@@ -123,6 +138,7 @@ function mountRunTimer({root,base,request,onChange,onError}) {
           if(!dirtyComments.has(name))input.value=value[name] ?? '';
         }
       }
+      if(value?.active){saveEnder();flushComments();}
       render();
     },
     active:()=>!!state?.active,
