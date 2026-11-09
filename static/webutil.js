@@ -150,16 +150,13 @@ function mountWebutil(context) {
     const previousEFN=get("#process-efn")?.value ?? context.getState?.()?.state?.raw_config?.ebinfo?.efn ?? "1";
     const data=await api(base+"/processes");if(!context.isLive())return;
     processItems=data.items;
-    view("processes").innerHTML=panel(`Process Manager <span class="pill ${data.babimo_connected ?? data.items.every(item=>typeof item.running==='boolean') ? 'green' : 'red'}">babimo ${data.babimo_connected ?? data.items.every(item=>typeof item.running==='boolean') ? 'CONNECTED' : 'UNAVAILABLE'}</span>`,`<div class="actions section"><label>EB fragment number <input class="input" id="process-efn" type="number" min="0" max="255" value="${Number(previousEFN)}"></label><input id="process-recovery" type="checkbox" hidden><button id="process-lock" class="button small" type="button" hidden aria-pressed="false">🔒 Emergency control locked</button></div><div class="table-scroll"><table><thead><tr><th>Process</th><th>STATE / PID</th><th>Actions</th></tr></thead><tbody>${data.items.map(item=>`<tr><td>${esc(item.name)}</td><td>${item.running===null ? esc(item.error || "Unavailable") : item.running ? `<span class="process-running">● Running · ${item.pid}</span>` : '<span class="process-stopped">● Stopped</span>'}</td><td class="actions">${["start","stop"].map(action=>`<button class="button small process-action" data-process="${esc(item.name)}" data-action="${action}">${action}</button>`).join("")}</td></tr>`).join("")}</tbody></table></div><div class="utility-result section"></div>`, '<button id="process-refresh" class="button small">↻ Reload processes</button>');
+    view("processes").innerHTML=panel(`Process Manager <span class="pill ${data.babimo_connected ?? data.items.every(item=>typeof item.running==='boolean') ? 'green' : 'red'}">babimo ${data.babimo_connected ?? data.items.every(item=>typeof item.running==='boolean') ? 'CONNECTED' : 'UNAVAILABLE'}</span>`,`<div class="actions section"><label>EB fragment number <input class="input" id="process-efn" type="number" min="0" max="255" value="${Number(previousEFN)}"></label><label id="process-lock" class="check-label lock-switch" hidden><input id="process-recovery" type="checkbox" role="switch">Emergency control <span id="process-lock-state" class="lock-state">Locked</span></label></div><div class="table-scroll"><table><thead><tr><th>Process</th><th>STATE / PID</th><th>Actions</th></tr></thead><tbody>${data.items.map(item=>`<tr><td>${esc(item.name)}</td><td>${item.running===null ? esc(item.error || "Unavailable") : item.running ? `<span class="process-running">● Running · ${item.pid}</span>` : '<span class="process-stopped">● Stopped</span>'}</td><td class="actions">${["start","stop"].map(action=>`<button class="button small process-action" data-process="${esc(item.name)}" data-action="${action}">${action}</button>`).join("")}</td></tr>`).join("")}</tbody></table></div><div class="utility-result section"></div>`, '<button id="process-refresh" class="button small">↻ Reload processes</button>');
     loaded.add("processes");
     get("#process-efn").value=previousEFN;
-    get("#process-recovery").onchange=()=>updateStatus(status);
-    get("#process-lock").onclick=guarded(async()=>{
+    get("#process-recovery").onchange=guarded(async()=>{
       const checkbox=get('#process-recovery');
-      if(!checkbox.checked && !await confirmAction('Unlock emergency process control?','Allows process actions while DAQ is running or unavailable. Actions may interrupt acquisition. Each action still requires confirmation.','Unlock'))return;
-      checkbox.checked=!checkbox.checked;
-      get('#process-lock').textContent=checkbox.checked ? '🔓 Emergency control unlocked' : '🔒 Emergency control locked';
-      get('#process-lock').setAttribute('aria-pressed',String(checkbox.checked));
+      const requested=checkbox.checked;checkbox.checked=false;
+      if(requested && await confirmAction('Enable emergency process control?','Allows process actions during acquisition. Each action still requires confirmation.','Enable'))checkbox.checked=true;
       updateStatus(status);
     });
     get("#process-refresh").onclick=guarded(loadProcesses);
@@ -207,10 +204,10 @@ function mountWebutil(context) {
     const lock=get("#process-lock"), recovery=get("#process-recovery");
     if(lock){
       lock.hidden=!running;
+      get("#process-lock-state").textContent=running && recovery.checked ? "Enabled" : "Locked";
       if(!running){
         recovery.checked=false;
-        lock.textContent="🔒 Emergency control locked";
-        lock.setAttribute("aria-pressed","false");
+
       }
     }
     const canWrite=status?.connected && status.state.state==="stopped" && !status.active_operation && !status.active_run && !status.eb_owner && status.state.target?.allow_writes!==false;
@@ -224,7 +221,7 @@ function mountWebutil(context) {
       button.disabled=unavailable || already || missingInfo || (!!status && (!!status.active_operation || (status.active_run && !recoveryStart) || !!status.eb_owner || status.state.target?.allow_writes===false || (["running","nssta"].includes(status.state.state) && !recoveryStart)));
       button.title=unavailable ? "Process state is unavailable. Reload processes." : already ? (button.dataset.action==="start" ? "Already running." : "Already stopped.") : missingInfo ? "Start babinfo before starting babild." : "";
     });
-    document.querySelectorAll(".utility-state").forEach(el=>{el.textContent=el.closest("#view-processes") ? (get("#process-recovery")?.checked ? "🔓 Emergency control enabled · operations may interrupt acquisition." : canWrite ? "DAQ is idle · operations available." : running ? "🔒 DAQ running · unlock for emergency control." : "Process actions require DAQ to be idle and no active operation.") : el.closest("#view-raw") ? "Read-only monitor · does not change DAQ settings." : canWrite ? "DAQ is idle · settings can be written and verified." : "Read-only while DAQ is running, unavailable, or an operation is active.";});
+    document.querySelectorAll(".utility-state").forEach(el=>{el.textContent=el.closest("#view-processes") ? (get("#process-recovery")?.checked ? "Emergency control enabled · operations may interrupt acquisition." : canWrite ? "DAQ is idle · operations available." : running ? "DAQ running · enable Emergency control for process actions." : "Process actions require DAQ to be idle and no active operation.") : el.closest("#view-raw") ? "Read-only monitor · does not change DAQ settings." : canWrite ? "DAQ is idle · settings can be written and verified." : "Read-only while DAQ is running, unavailable, or an operation is active.";});
   }
   async function activate(name) {
     tab=name;clearTimeout(rawTimer);

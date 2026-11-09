@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261109-timer-20";
+const GUI_BUILD = "v1-20261109-comments-21";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -206,8 +206,8 @@ async function controlPage(eid, config, version, revision) {
         <div class="field recall-field"><label for="recall">Recall saved Run</label><select id="recall"><option value="">Choose a saved Run name…</option></select></div>
         <div class="field-row"><div class="field"><label for="run-name">Run name</label><input id="run-name" autocomplete="off" placeholder="physics" maxlength="79"></div><div class="field"><label for="run-number">Current number</label><input id="run-number" type="number" min="0" max="2147483647" step="1"></div></div>
         <div class="actions apply-row"><button class="button small" id="apply-run" disabled>Set Run Name / Number</button><span class="form-note" id="draft-status">Current controller values</span></div>
-        <div class="field header-field"><label for="run-header">Header<span class="comment-bytes" id="header-limit"><span id="header-bytes">0</span> / 79 bytes</span></label><textarea id="run-header" aria-label="Header" aria-describedby="header-limit" maxlength="79" rows="2" placeholder="Describe this Run"></textarea></div>
-        <div class="field ender-field"><label for="run-ender">Ender<span class="comment-bytes" id="ender-limit"><span id="ender-bytes">0</span> / 79 bytes</span></label><textarea id="run-ender" aria-label="Ender" aria-describedby="ender-limit" maxlength="79" rows="2" placeholder="Comment saved when the Run stops"></textarea></div>
+        <div class="field header-field"><div class="comment-label-row"><label for="run-header">Header<span class="comment-bytes" id="header-limit"><span id="header-bytes">0</span> / 79 bytes</span></label><label class="check-label lock-switch comment-lock" id="header-lock-control" hidden><input type="checkbox" role="switch" id="header-edit" aria-label="Edit Header"><span id="header-lock-state">Locked</span><span class="comment-lock-note">(next Start)</span></label></div><textarea id="run-header" aria-label="Header" aria-describedby="header-limit" maxlength="79" rows="2" placeholder="Describe this Run"></textarea></div>
+        <div class="field ender-field"><div class="comment-label-row"><label for="run-ender">Ender<span class="comment-bytes" id="ender-limit"><span id="ender-bytes">0</span> / 79 bytes</span></label><label class="check-label lock-switch comment-lock" id="ender-lock-control" hidden><input type="checkbox" role="switch" id="ender-edit" aria-label="Edit Ender"><span id="ender-lock-state">Locked</span><span class="comment-lock-note">(next Stop)</span></label></div><textarea id="run-ender" aria-label="Ender" aria-describedby="ender-limit" maxlength="79" rows="2" placeholder="Comment saved when the Run stops"></textarea></div>
         <div class="run-timer"><div class="timer-heading"><label class="check-label timer-switch"><input type="checkbox" role="switch" id="timer-enabled">Timer</label><span id="timer-status" class="small-text muted" role="status"></span></div><div id="timer-options" hidden><div class="timer-duration"><label>h<input class="input" id="timer-hours" type="number" min="0" max="8760" step="1" value="0"></label><label>min<input class="input" id="timer-minutes" type="number" min="0" max="59" step="1" value="1"></label><label>sec<input class="input" id="timer-seconds" type="number" min="0" max="59" step="1" value="0"></label><label class="check-label timer-switch"><input type="checkbox" role="switch" id="timer-repeat">Repeat</label></div><div id="timer-repeat-options" class="timer-repeat-options" hidden><label>Total Runs<input class="input" id="timer-count" type="number" min="1" max="1000000" step="1" value="2"></label><span id="timer-progress" class="small-text">Completed 0 / 2</span></div></div></div>
         <div class="control-actions ${config.run_control_api.enable_nssta ? "" : "two-actions"}"><button class="button start-button" id="start" disabled>▶ Start</button><button class="button stop-button" id="stop" disabled>■ Stop</button>${config.run_control_api.enable_nssta ? `<button class="button nssta-button" id="nssta" disabled>▷ NSSTA</button>` : ""}<button class="button stop-button" id="manual-stop" hidden disabled>■ Manual Stop</button></div>
         <p id="stop-wait" class="form-note mono" role="status" aria-live="polite" hidden></p>
@@ -286,7 +286,7 @@ async function controlPage(eid, config, version, revision) {
   };
   $("#refresh-snapshot").onclick = () => { refreshRequested = true; poll(); };
 
-  const runTimer=mountRunTimer({root:app,base,request:api,onChange:controls});
+  const runTimer=mountRunTimer({root:app,base,request:api,onChange:controls,onError:message=>toast(message,true)});
 
   function controls() {
     const availability = daqControlState({status:current ? {...current,restart_unlocked:restartOverride || current.restart_unlocked} : {restart_unlocked:restartOverride},pending,draftDirty,
@@ -311,18 +311,22 @@ async function controlPage(eid, config, version, revision) {
     $('#manual-stop').disabled=manualLocked || !!availability.stopReason || !!enderReason;
     $('#manual-stop').title='Send Stop immediately and reset timer counts.';
     $("#esconnect").disabled=manualLocked || pending || !!current?.active_operation || current?.state?.state!=='stopped' || !current?.connected || !!current?.eb_owner || current?.state?.target?.allow_writes===false;
-    for (const selector of ["#run-name","#run-number","#recall","#run-header"]) $(selector).disabled = runTimer.active() || manualLocked || !availability.editable;
+    for (const selector of ["#run-name","#run-number","#recall"]) $(selector).disabled = runTimer.active() || manualLocked || !availability.editable;
     $("#draft-status").textContent = draftDirty ? "Edited · set before Start" : "Current controller values";
     $("#draft-status").style.color = draftDirty ? "var(--amber)" : "";
-    $("#run-ender").disabled=runTimer.active() || manualLocked || pending || !!current?.active_operation || current?.state?.target?.allow_writes===false;
+    const commentBlocked=manualLocked || pending || !!current?.eb_owner || current?.state?.target?.allow_writes===false;
+    const headerEditable=runTimer.active() ? !runTimer.repeating() || $("#header-edit").checked : availability.editable;
+    $("#run-header").disabled=commentBlocked || !headerEditable;
+    $("#run-ender").disabled=commentBlocked || (runTimer.repeating() && !$("#ender-edit").checked) || (!runTimer.active() && !!current?.active_operation);
+    if(runTimer.repeating() && !$("#header-edit").checked)$("#run-header").disabled=true;
   }
 
   for (const selector of ["#run-name","#run-number"]) $(selector).addEventListener("input", () => {
     draftDirty = $("#run-name").value !== current?.state?.runname || Number($("#run-number").value) !== current?.state?.runnumber;
     controls();
   });
-  $("#run-ender").addEventListener("input",controls);
-  $("#run-header").addEventListener("input", () => { headerDirty = true; controls(); });
+  $("#run-ender").addEventListener("input",()=>{runTimer.changeComment("ender",$("#run-ender").value);controls();});
+  $("#run-header").addEventListener("input", () => { headerDirty = true;runTimer.changeComment("header",$("#run-header").value); controls(); });
   $("#recall").onchange = () => {
     const memory = historyData.recall.runs[Number($("#recall").value)];
     if ($("#recall").value === "" || !memory) return;
@@ -509,7 +513,7 @@ async function controlPage(eid, config, version, revision) {
       if (!draftDirty && status.connected) {
         $("#run-name").value = state.runname; $("#run-number").value = state.runnumber;
       }
-      if (!headerDirty && status.connected) $("#run-header").value = state.header || "";
+      if (!headerDirty && status.connected && !runTimer.active()) $("#run-header").value = state.header || "";
       const warning = $("#connection-warning");
       warning.hidden = true;
       if (!status.connected || status.eb_owner || state.target?.allow_writes === false) {
@@ -571,7 +575,7 @@ async function editorPage(eid, data, version) {
   const experimentURL=new URL(data.experiment_path || `/experiments/${encodeURIComponent(eid)}`,location.origin).href;
   app.innerHTML = `${crumbs(config.experiment, "Configuration")}<div class="page-head"><div><div class="eyebrow">EXPERIMENT CONFIGURATION</div><h1>Edit configuration</h1><p class="subtitle">${html(config.experiment.name)} </p></div><a class="button" href="/experiments/${encodeURIComponent(eid)}">← Back to control</a></div>
     <div class="panel panel-body section"><div class="field"><label>Experiment URL</label><a class="mono wrap" href="${html(experimentURL)}" target="_blank" rel="noopener">${html(experimentURL)}</a><p class="form-note">Configured GUI port: ${html(data.server_port ?? location.port)}</p></div></div><div class="editor-layout"><aside class="editor-aside"><h3>Configuration</h3><p>Experiment</p><p>Event Builder</p><p>Run Control API</p><p>babimo · Restart DAQ</p><p>APIs</p><div class="divider"></div><p>Saved to:</p><p class="mono">config/<br>experiment.yaml</p><p>Saving does not contact DAQ. Active operations and unfinished Run records must be resolved first. A backup is kept on save.</p></aside>
-    <div class="editor-content"><div class="actions" style="justify-content:space-between"><button class="button small" id="metadata-lock" type="button">🔒 Unlock Experiment details</button><div class="editor-switch"><button id="mode-form" class="active" type="button">Form</button><button id="mode-yaml" type="button">YAML</button></div></div>
+    <div class="editor-content"><div class="actions" style="justify-content:space-between"><label class="check-label lock-switch"><input id="metadata-lock" type="checkbox" role="switch">Edit experiment details <span id="metadata-lock-state" class="lock-state">Locked</span></label><div class="editor-switch"><button id="mode-form" class="active" type="button">Form</button><button id="mode-yaml" type="button">YAML</button></div></div>
     <div id="editor-form"></div><div id="editor-yaml" class="field" hidden><label for="yaml-source">experiment.yaml</label><textarea id="yaml-source" class="yaml-editor" spellcheck="false"></textarea></div>
     <section class="panel section"><div class="panel-head"><h2>Configuration history</h2><button class="button small" id="reload-edits">Reload history</button></div><div class="panel-body"><div class="actions history-selection"><label class="check-label"><input type="checkbox" id="select-all-edits">Select all</label><span class="small-text muted" id="selected-edits-count">0 selected</span><button type="button" class="button small danger" id="delete-selected-edits" disabled>Delete selected</button></div><div id="config-edits"></div></div></section>
     <div class="field section"><label for="edit-comment">History comment (optional)</label><input id="edit-comment" maxlength="1000" placeholder="Describe this configuration change"></div><div class="editor-toolbar"><span class="small-text muted" id="save-state">No unsaved changes</span><div class="actions"><a id="editor-back" class="button" href="/experiments/${encodeURIComponent(eid)}">Cancel &amp; Back to control</a><button id="discard-config" class="button danger" type="button" hidden>Discard changes</button><button id="save-config" class="button primary">Save</button></div></div></div></div>${footer()}`;
@@ -741,10 +745,9 @@ async function editorPage(eid, data, version) {
       return hook;
     });
   }
-  $("#metadata-lock").onclick=()=>{
-    metadataUnlocked=!metadataUnlocked;
-    $("#metadata-lock").textContent=metadataUnlocked ? "🔓 Lock Experiment details" : "🔒 Unlock Experiment details";
-    $("#metadata-lock").setAttribute("aria-pressed",String(metadataUnlocked));
+  $("#metadata-lock").onchange=()=>{
+    metadataUnlocked=$("#metadata-lock").checked;
+    $("#metadata-lock-state").textContent=metadataUnlocked ? "Editable" : "Locked";
     $("#edit-id").disabled=!metadataUnlocked;$("#edit-name").disabled=!metadataUnlocked;$("#edit-description").disabled=!metadataUnlocked;
   };
   $("#edit-comment").addEventListener("input",markDirty);

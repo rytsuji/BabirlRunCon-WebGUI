@@ -24,7 +24,7 @@ from monitor import Monitor
 from service import ControlService
 from storage import Store, now
 
-BUILD_ID = "v1-20261109-timer-20"
+BUILD_ID = "v1-20261109-comments-21"
 BASE = Path(__file__).resolve().parent
 
 
@@ -87,6 +87,21 @@ class RunTimerSpec(Strict):
     duration_sec: int = Field(ge=1, le=31536000, strict=True)
     repeat: bool = False
     total_runs: int = Field(default=1, ge=1, le=1000000, strict=True)
+
+
+class RunTimerComments(Strict):
+    id: str
+    header: Optional[str] = None
+    ender: Optional[str] = None
+
+    @model_validator(mode='after')
+    def validate_comments(self):
+        if self.header is None and self.ender is None:
+            raise ValueError('Enter Header or Ender')
+        for value in (self.header, self.ender):
+            if value is not None and ('\x00' in value or len(value.encode('utf-8')) > 79):
+                raise ValueError('Header and Ender accept at most 79 UTF-8 bytes without NUL')
+        return self
 
 
 class ActionRequest(Strict):
@@ -303,6 +318,8 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
             raise HTTPException(409, 'This EB is controlled by another experiment.')
         if store.active_run(eid) and not body.allow_running and not (body.allow_unavailable and body.action == 'start'):
             raise HTTPException(409, 'Resolve the unfinished Run first.')
+        if body.allow_running or body.allow_unavailable:
+            await run_timers.cancel(eid, 'Timer cancelled by emergency process control.')
         op = service.reserve(config, eid, 'process-' + body.action)
         try:
             result = await service.step(eid, op, body.action + ' ' + body.process,
@@ -490,6 +507,11 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
     async def finish_timer(eid: str):
         config_for(eid)
         return run_timers.finish(eid)
+
+    @app.patch('/api/experiments/{eid}/timer/comments')
+    async def update_timer_comments(eid: str, body: RunTimerComments):
+        config_for(eid)
+        return run_timers.update_comments(eid, body.id, body.header, body.ender)
 
     async def submit_action(eid, request, automatic=False):
         config, _, _ = config_for(eid)

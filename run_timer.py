@@ -22,7 +22,7 @@ class RunTimers:
             return None
         return {key: plan[key] for key in (
             'id', 'active', 'phase', 'mode', 'duration_sec', 'repeat',
-            'total_runs', 'completed_runs', 'finish_requested', 'message')
+            'total_runs', 'completed_runs', 'finish_requested', 'message', 'header', 'ender')
         } | {'remaining_runs': max(0, plan['total_runs'] - plan['completed_runs']),
              'remaining_sec': max(0, int(plan['deadline'] - time.monotonic() + .999))
              if plan.get('deadline') else None}
@@ -33,6 +33,16 @@ class RunTimers:
             raise HTTPException(409, 'No active Run timer.')
         plan['finish_requested'] = True
         plan['message'] = 'Finishing after the current timed Run.'
+        return self.public(eid)
+
+    def update_comments(self, eid, plan_id, header=None, ender=None):
+        plan = self.plans.get(eid)
+        if not plan or not plan['active'] or plan['id'] != plan_id:
+            raise HTTPException(409, 'Run timer changed or is no longer active.')
+        if header is not None:
+            plan['header'] = header
+        if ender is not None:
+            plan['ender'] = ender
         return self.public(eid)
 
     async def cancel(self, eid, message='Timer cancelled by manual control.'):
@@ -55,10 +65,11 @@ class RunTimers:
                     phase='starting', mode=mode, duration_sec=spec.duration_sec,
                     repeat=spec.repeat, total_runs=spec.total_runs if spec.repeat else 1,
                     completed_runs=0, finish_requested=False, deadline=None,
+                    header=header, ender=ender,
                     message='Waiting for DAQ to start.')
         self.plans[eid] = plan
         self.owners[key] = plan
-        task = asyncio.create_task(self.run(plan, config, header, ender, operation))
+        task = asyncio.create_task(self.run(plan, config, operation))
         plan['task'] = task
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
@@ -81,7 +92,7 @@ class RunTimers:
             raise RuntimeError(operation.get('message') or 'DAQ operation failed.')
         self.check_errors(plan, config)
 
-    async def run(self, plan, config, header, ender, operation):
+    async def run(self, plan, config, operation):
         eid = plan['experiment_id']
         try:
             while plan['active']:
@@ -96,7 +107,7 @@ class RunTimers:
                 while plan['key'] in self.service.manual_active or plan['key'] in self.service.active:
                     self.check_errors(plan, config)
                     await asyncio.sleep(.1)
-                operation = await self.submit(eid, 'stop', '', ender)
+                operation = await self.submit(eid, 'stop', '', plan['ender'])
                 await self.wait_operation(plan, config, operation)
                 plan['completed_runs'] += 1
                 if plan['finish_requested'] or plan['completed_runs'] >= plan['total_runs']:
@@ -104,7 +115,7 @@ class RunTimers:
                                 message='Timed acquisition completed. Count reset.')
                     break
                 plan.update(phase='starting', message='Starting the next timed Run.')
-                operation = await self.submit(eid, plan['mode'], header, '')
+                operation = await self.submit(eid, plan['mode'], plan['header'], '')
         except asyncio.CancelledError:
             if plan['active']:
                 plan.update(active=False, phase='cancelled', message='GUI server stopped. Timer will not resume automatically.')

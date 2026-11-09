@@ -1,10 +1,12 @@
 "use strict";
 
-function mountRunTimer({root,base,request,onChange}) {
+function mountRunTimer({root,base,request,onChange,onError}) {
   const get=selector=>root.querySelector(selector);
   let state=null, loadedId=null, ignoredId=null;
   const enabled=get('#timer-enabled'), repeat=get('#timer-repeat');
   const fields=['#timer-hours','#timer-minutes','#timer-seconds','#timer-repeat','#timer-count'];
+  const dirtyComments=new Set();
+  let commentQueue={}, commentBusy=false;
   const storageKey='babirl-run-timer:'+base;
   function savePreferences(){
     try{
@@ -28,6 +30,10 @@ function mountRunTimer({root,base,request,onChange}) {
     get('#timer-options').hidden=!enabled.checked;
     get('#timer-repeat-options').hidden=!repeat.checked;
     get('#manual-stop').hidden=!(enabled.checked && repeat.checked);
+    for(const name of ['header','ender']){
+      get('#'+name+'-lock-control').hidden=!(enabled.checked && repeat.checked);
+      get('#'+name+'-lock-state').textContent=get('#'+name+'-edit').checked ? 'Editable' : 'Locked';
+    }
     get('.control-actions').classList.toggle('with-manual-stop',enabled.checked && repeat.checked);
     enabled.disabled=active;
     fields.forEach(selector=>get(selector).disabled=active);
@@ -42,7 +48,27 @@ function mountRunTimer({root,base,request,onChange}) {
     savePreferences();render();onChange();
   });
   render();
+  async function flushComments(){
+    if(commentBusy)return;
+    commentBusy=true;
+    try{
+      while(Object.keys(commentQueue).length){
+        const changes=commentQueue;commentQueue={};
+        if(!state?.active)return;
+        await request(base+'/timer/comments',{method:'PATCH',body:{id:state.id,...changes}});
+      }
+    }catch(error){onError?.(error.message);}
+    finally{commentBusy=false;}
+  }
+  for(const name of ['header','ender'])get('#'+name+'-edit').onchange=()=>{render();onChange();};
   return {
+    changeComment(name,value){
+      if(!state?.active)return;
+      dirtyComments.add(name);
+      if(new TextEncoder().encode(value).length>79 || value.includes('\0'))return;
+      commentQueue[name]=value;flushComments();
+    },
+    repeating:()=>enabled.checked && repeat.checked,
     spec(){
       if(!enabled.checked)return null;
       const hours=Number(get('#timer-hours').value), minutes=Number(get('#timer-minutes').value), seconds=Number(get('#timer-seconds').value);
@@ -56,12 +82,20 @@ function mountRunTimer({root,base,request,onChange}) {
       if(value && !value.active && value.id===ignoredId){state=null;render();return;}
       state=value;
       if(value?.active && value.id!==loadedId){
+        dirtyComments.clear();commentQueue={};
         loadedId=value.id;enabled.checked=true;repeat.checked=value.repeat;
         get('#timer-hours').value=Math.floor(value.duration_sec/3600);
         get('#timer-minutes').value=Math.floor(value.duration_sec/60)%60;
         get('#timer-seconds').value=value.duration_sec%60;
         get('#timer-count').value=value.total_runs;
         savePreferences();
+      }
+      if(value?.active){
+        for(const name of ['header','ender']){
+          const input=get('#run-'+name);
+          if(value[name]===input.value)dirtyComments.delete(name);
+          if(!dirtyComments.has(name))input.value=value[name] ?? '';
+        }
       }
       render();
     },

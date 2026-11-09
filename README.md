@@ -58,7 +58,11 @@ Run, to repeat the same mode after each normal Stop and its Stop APIs finish.
 During repetition, **Stop** finishes the current timed Run without starting another;
 **Manual Stop** sends Stop immediately and cancels repetition. Manual Stop, Restart
 DAQ and completion reset the count. DAQ errors stop automatic scheduling.
-Timer settings, Header and Ender are fixed while a timer is active.
+Timer duration and repeat settings are fixed while a timer is active.
+In Repeat mode, use the switch beside Header or Ender to change **Locked** to
+**Editable**. Header edits apply to the next Start; Ender edits apply to the next
+Stop, including the current Run when edited during acquisition. Valid edits are
+sent automatically. The current Run's Header is not changed.
 Timer and Repeat switches, duration and total Runs are remembered per experiment
 in the current browser. Completed counts are shown in black and reset on completion
 or manual Stop/Restart.

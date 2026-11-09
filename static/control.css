@@ -138,9 +138,19 @@
 .control-page #manual-stop{background:#fff;color:#a52930;border-color:#c43a40}
 
 #timer-progress{color:#16191f;font-weight:600}
-.timer-switch>input[type="checkbox"]{appearance:none;-webkit-appearance:none;position:relative;width:30px;height:17px;flex:0 0 30px;border:1px solid #929aa6;border-radius:12px;background:#a2a9b3;cursor:pointer;margin:0;transition:background .15s}
-.timer-switch>input[type="checkbox"]::before{content:"";position:absolute;top:2px;left:2px;width:11px;height:11px;border-radius:50%;background:#fff;transition:transform .15s}
-.timer-switch>input[type="checkbox"]:checked{background:#245ccb;border-color:#245ccb}
-.timer-switch>input[type="checkbox"]:checked::before{transform:translateX(13px)}
-.timer-switch>input[type="checkbox"]:focus-visible{outline:2px solid #7ea6ff;outline-offset:2px}
-.timer-switch>input[type="checkbox"]:disabled{cursor:not-allowed}
+:is(.timer-switch,.lock-switch)>input[type="checkbox"]{appearance:none;-webkit-appearance:none;position:relative;width:30px;height:17px;flex:0 0 30px;border:1px solid #929aa6;border-radius:12px;background:#a2a9b3;cursor:pointer;margin:0;transition:background .15s}
+:is(.timer-switch,.lock-switch)>input[type="checkbox"]::before{content:"";position:absolute;top:2px;left:2px;width:11px;height:11px;border-radius:50%;background:#fff;transition:transform .15s}
+:is(.timer-switch,.lock-switch)>input[type="checkbox"]:checked{background:#245ccb;border-color:#245ccb}
+:is(.timer-switch,.lock-switch)>input[type="checkbox"]:checked::before{transform:translateX(13px)}
+:is(.timer-switch,.lock-switch)>input[type="checkbox"]:focus-visible{outline:2px solid #7ea6ff;outline-offset:2px}
+:is(.timer-switch,.lock-switch)>input[type="checkbox"]:disabled{cursor:not-allowed}
+
+/* An 86px operation body sets the column's natural height, then grows into spare space. */
+.operation-panel #operation-body{height:86px;min-height:0}
+@media(min-width:851px){.control-column>.operation-panel{min-height:0;flex:1 1 auto}.operation-panel #operation-body{flex:1 1 86px}}
+@media(max-width:850px){.operation-panel #operation-body{height:auto;max-height:86px}}
+.comment-label-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.control-page .comment-label-row>label{margin:0}
+.comment-lock{gap:5px!important;font-size:10px!important}
+.comment-lock-note{font-size:10px;color:var(--muted)}
+.lock-state{font-size:10px;font-weight:600;border:1px solid var(--line);padding:1px 5px;border-radius:4px}
