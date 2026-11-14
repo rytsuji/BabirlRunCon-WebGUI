@@ -373,9 +373,9 @@ class ControlService:
                         lambda:asyncio.wait_for(ensure_idle(),max(10,config.run_control_api.stop_timeout)))
                     unfinished=self.store.active_run(eid)
                     if unfinished:
-                        unfinished.update(status='interrupted',finished_at=now(),daq_config=state['raw_config'],
+                        unfinished.update(status='aborted',finished_at=now(),daq_config=state['raw_config'],
                             event_num=state['event_num'],es_event_num=state['es_event_num'],
-                            reconciliation='DAQ restart verified IDLE. Unfinished Run interrupted; post-run APIs were not executed.')
+                            reconciliation='DAQ restart verified IDLE. Unfinished Run aborted; post-run APIs were not executed.')
                         self.store.put_run(eid,unfinished)
                     # DAQ recovery is complete even if a separate ES reconnect fails.
                     self.store.clear_control_errors(eid)
