@@ -169,7 +169,6 @@ class ControlService:
                 if getattr(hook,'send_query_params',False) and hook.query_params:
                     for argument in hook.query_params:
                         if argument.source=='getconfig_json':value=state.get('raw_config')
-                        elif argument.source=='run_history_json':value=[self.store.public_run(run) for run in self.store.runs(eid)]
                         elif argument.source=='current_run_json':
                             runs=self.store.runs(eid,limit=1)
                             value=self.store.public_run(runs[0]) if runs else None

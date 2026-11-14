@@ -1,9 +1,9 @@
 "use strict";
 
-const DAQ_ARGUMENT_SOURCES={runname:'Run name',runnumber:'Current Run number',header:'Header',event_num:'Event count',start_time:'Start time (babirl)',stop_time:'Stop time (babirl)',state:'DAQ state',getconfig_json:'getconfig (JSON)',current_run_json:'Current Run record (JSON)',run_history_json:'Run history: latest 50 (JSON)'};
+const DAQ_ARGUMENT_SOURCES={runname:'Run name',runnumber:'Current Run number',header:'Header',event_num:'Event count',start_time:'Start time (babirl)',stop_time:'Stop time (babirl)',state:'DAQ state',getconfig_json:'getconfig (JSON)',current_run_json:'Latest Run History (JSON)'};
 function argumentDescription(source){
   if(source==='custom')return 'Web GUI input: entered manually in the API tab. The template is a placeholder, never a default value.';
-  if(source==='current_run_json' || source==='run_history_json')return 'Web GUI Run records: mode, status, daq_config, event_num, es_event_num, config_snapshot, error (when present). Run history includes the latest 50 records; current Run selects the latest record.';
+  if(source==='current_run_json')return 'Web GUI: the latest saved Run History entry (including an in-progress Run). Same JSON as Run History → JSON: mode, status, daq_config, event_num, es_event_num, config_snapshot, and error when present.';
   if(source==='state')return 'Web GUI state mapped from babirl: stopped (IDLE), running (START), nssta (NSSTA), unknown.';
   if(source==='getconfig_json')return 'babirl: the shared Run overview getconfig snapshot (runinfo, eflist, hdlist and other DAQ settings).';
   return 'babirl via the shared Run overview snapshot: '+({runname:'current Run name.',runnumber:'current Run number, without zero padding.',header:'Run header.',event_num:'current event count.',start_time:'Run start time, formatted by the Web GUI.',stop_time:'Run stop time, formatted by the Web GUI.'}[source] || 'current DAQ value.');

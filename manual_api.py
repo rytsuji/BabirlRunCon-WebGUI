@@ -17,8 +17,6 @@ async def execute_manual(client, endpoint, arguments, request, state, store, eid
                     value = arguments.get(argument.name, '')
                 elif argument.source == 'getconfig_json':
                     value = state.get('raw_config')
-                elif argument.source == 'run_history_json':
-                    value = [store.public_run(run) for run in store.runs(eid)]
                 elif argument.source == 'current_run_json':
                     runs = store.runs(eid, limit=1)
                     value = store.public_run(runs[0]) if runs else None

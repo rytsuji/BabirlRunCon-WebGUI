@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261109-ender-24";
+const GUI_BUILD = "v1-20261114-history-json-28";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -180,7 +180,7 @@ function newExperimentPage(copyConfig=null) {
 
 async function controlPage(eid, config, version, revision) {
   const base = `/api/experiments/${encodeURIComponent(eid)}`;
-  let historyMode = "saved", restartOverride=false;
+  let historyMode = "saved", restartOverride=false, configView=null;
   let stopWaitStarted=null, stopWaitTicker=null, stopWaitId=null;
   let lastErrorSignature='', lastRestartFinished=null, lastTransitionId=null;
   let current = null, historyData = {runs:[], recall:{runs:[]}, operations:[]};
@@ -216,7 +216,7 @@ async function controlPage(eid, config, version, revision) {
       <section class="panel overview-panel"><div class="panel-head"><h2>Run overview</h2><div class="actions"><button class="button small" id="refresh-snapshot">↻ Refresh</button><span id="daq-state">${pill("CONNECTING")}</span></div></div><div class="panel-body">
         <div class="stat-grid"><div><div class="stat-label">RUN NAME</div><div class="stat-value" id="live-name">—</div></div><div><div class="stat-label">CURRENT NUMBER</div><div class="stat-value" id="live-number">—</div></div><div><div class="stat-label">EVENTS</div><div class="stat-value blue" id="live-events">—</div></div></div>
         <dl class="detail-list"><dt>Header</dt><dd id="live-header">—</dd><dt>Ender</dt><dd id="live-ender">—</dd><dt>Start time</dt><dd id="live-start">—</dd><dt>Stop time</dt><dd id="live-stop">—</dd></dl>
-        <div id="es-counters" class="es-counters" aria-label="ES event counts"></div><div class="divider"></div><details id="config-details"><summary>DAQ configuration</summary><div id="live-config" class="daq-format">Waiting for DAQ…</div></details>
+        <div id="es-counters" class="es-counters" aria-label="ES event counts"></div><div class="divider"></div><div class="actions"><button class="button small" id="show-config" aria-expanded="false" aria-controls="config-details">DAQ configuration</button><button class="button small" id="show-config-json" aria-expanded="false" aria-controls="config-details">DAQ configuration (JSON)</button></div><div id="config-details" hidden><div id="live-config" class="daq-format">Waiting for DAQ…</div></div>
         <p id="acquisition-warning" class="form-note error-text" hidden></p>
       </div><div class="panel-foot small-text muted" id="last-checked">Values are read from the DAQ controller.</div></section>
     </div>
@@ -319,6 +319,21 @@ async function controlPage(eid, config, version, revision) {
     $("#run-header").disabled=commentBlocked || !headerEditable;
     $("#run-ender").disabled=commentBlocked || (runTimer.repeating() && !$("#ender-edit").checked) || (!runTimer.active() && !!current?.active_operation);
     if(runTimer.repeating() && !$("#header-edit").checked)$("#run-header").disabled=true;
+  }
+
+  function renderLiveConfig() {
+    const raw=current?.state?.raw_config || {};
+    $("#config-details").hidden=configView===null;
+    $("#live-config").innerHTML=configView==="json"
+      ? `<pre class="raw-json">${html(JSON.stringify(raw,null,2))}</pre>` : formatDAQ(raw);
+    for(const [id,view] of [["show-config","details"],["show-config-json","json"]]){
+      const selected=configView===view, button=$("#"+id);
+      button.setAttribute("aria-expanded",String(selected));
+      button.classList.toggle("primary",selected);
+    }
+  }
+  for(const [id,view] of [["show-config","details"],["show-config-json","json"]]){
+    $("#"+id).onclick=()=>{configView=configView===view ? null : view;renderLiveConfig();};
   }
 
   for (const selector of ["#run-name","#run-number"]) $(selector).addEventListener("input", () => {
@@ -505,7 +520,7 @@ async function controlPage(eid, config, version, revision) {
         (es?.items || []).map(item => `<div class="es-connection-item ${item.enabled ? "" : "muted"}"><span>ES ${html(item.efn)}</span><span title="${html(item.host)}"><span class="es-mode">${html(normalizeEFMode(item.onoff ?? item.mode) ?? (item.enabled ? "UNKNOWN" : "OFF"))}</span> ${html(item.name || item.host)}</span><span class="${!item.enabled ? 'muted' : item.connect===1 ? 'es-status-connected' : item.connect===0 ? 'es-status-disconnected' : 'es-status-unknown'}">${item.enabled ? (item.connect === 1 ? "● Connected" : item.connect === 0 ? "○ connect=0" : "? Unknown") : "OFF · excluded"}</span>${item.error ? `<span class="error-text">${html(item.error)}</span>` : ""}</div>`).join("") || '<span class="muted">No ES configured</span>';
       $("#daq-state").innerHTML = statusPill(state.state);
       for (const [id,value] of [["live-name",state.runname],["live-number",runNumber(state.runnumber)],["live-events",state.event_num == null ? null : Number(state.event_num).toLocaleString()],["live-header",state.header],["live-ender",state.ender || "—"],["live-start",formatTime(state.start_time)],["live-stop",formatTime(state.stop_time)]]) $("#"+id).textContent = value ?? "—";
-      $("#live-config").innerHTML = formatDAQ(state.raw_config || {});
+      renderLiveConfig();
       $("#es-counters").innerHTML = formatESCounters(state.es_event_num,state.ef_info);
       $("#last-checked").textContent = `Snapshot ${formatTime(status.snapshot_at)} · counters ${formatTime(status.events_at)} · ${config.run_control_api.event_poll_interval_sec ?? 2}s`;
       const errors = state.acquisition_errors || {};
@@ -534,18 +549,20 @@ async function controlPage(eid, config, version, revision) {
         const selected = $("#recall").value;
         $("#recall").innerHTML = `<option value="">Choose a saved Run name…</option>` + hist.recall.runs.map((r,index) => `<option value="${index}">${html(r.name)} · ${runNumber(r.current_number)}</option>`).join("");
         $("#recall").value = selected;
-        $("#run-history").innerHTML = hist.runs.map((run,index) => `<tr><td><strong>${html(run.runname)}</strong> <span class="mono muted">${runNumber(run.runnumber)}</span></td><td>${run.mode === "nssta" ? "NSSTA" : "Saved"}</td><td class="wrap">${html(run.header)}</td><td class="wrap">${html(run.ender || "")}</td><td>${html(formatTime(run.started_at))}</td><td>${pill(run.status, ["completed","stopped"].includes(run.status) ? "green" : run.status === "running" ? "blue" : ["failed","postprocess_failed","unknown"].includes(run.status) ? "red" : "")}</td><td class="actions"><button class="button small" data-inspect="${index}" aria-expanded="false">Details ↓</button><!-- <button class="button small" data-download="${index}">JSON ↓</button> --></td></tr><tr id="run-detail-${index}" hidden><td colspan="7"><div class="run-expanded">${formatDAQ(runDownload(run))}</div></td></tr>`).join("") || `<tr><td colspan="7" class="empty-cell">No Runs match this mode.</td></tr>`;
-        $("#run-history").querySelectorAll("[data-inspect]").forEach(button => button.onclick = () => {
-          const row = $("#run-detail-" + button.dataset.inspect);
-          row.hidden = !row.hidden;
-          button.setAttribute("aria-expanded", String(!row.hidden));
-          button.textContent = row.hidden ? "Details ↓" : "Details ↑";
-        });
-        $("#run-history").querySelectorAll("[data-download]").forEach(button => button.onclick = () => {
-          const run = historyData.runs[Number(button.dataset.download)];
-          const blob = new Blob([JSON.stringify(runDownload(run),null,2)], {type:"application/json"});
-          const url = URL.createObjectURL(blob), a = document.createElement("a");
-          a.href = url; a.download = `${run.runname}_${runNumber(run.runnumber)}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url),1000);
+        $("#run-history").innerHTML = hist.runs.map((run,index) => `<tr><td><strong>${html(run.runname)}</strong> <span class="mono muted">${runNumber(run.runnumber)}</span></td><td>${run.mode === "nssta" ? "NSSTA" : "Saved"}</td><td class="wrap">${html(run.header)}</td><td class="wrap">${html(run.ender || "")}</td><td>${html(formatTime(run.started_at))}</td><td>${pill(run.status, ["completed","stopped"].includes(run.status) ? "green" : run.status === "running" ? "blue" : ["failed","postprocess_failed","unknown"].includes(run.status) ? "red" : "")}</td><td class="actions"><button class="button small" data-inspect="${index}" aria-expanded="false">Details ↓</button><button class="button small" data-history-json="${index}" aria-expanded="false">JSON ↓</button></td></tr><tr id="run-detail-${index}" hidden><td colspan="7"><div class="run-expanded">${formatDAQ(runDownload(run))}</div></td></tr>`).join("") || `<tr><td colspan="7" class="empty-cell">No Runs match this mode.</td></tr>`;
+        $("#run-history").querySelectorAll("[data-inspect], [data-history-json]").forEach(button => button.onclick = () => {
+          const index=button.dataset.inspect ?? button.dataset.historyJson;
+          const row=$("#run-detail-"+index), view=button.dataset.inspect!==undefined ? "details" : "json";
+          const close=!row.hidden && row.dataset.view===view;
+          const record=runDownload(historyData.runs[Number(index)]);
+          row.hidden=close;row.dataset.view=view;
+          row.querySelector(".run-expanded").innerHTML=view==="json"
+            ? `<pre class="raw-json">${html(JSON.stringify(record,null,2))}</pre>` : formatDAQ(record);
+          for(const item of button.parentElement.querySelectorAll("button")){
+            const selected=!close && item===button;
+            item.setAttribute("aria-expanded",String(selected));
+            item.textContent=(item.dataset.inspect!==undefined ? "Details" : "JSON")+(selected ? " ↑" : " ↓");
+          }
         });
       }
       renderOperation(status.active_operation || hist.operations[0]); controls(); utilities.updateStatus(status);

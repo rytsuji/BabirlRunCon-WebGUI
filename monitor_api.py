@@ -15,9 +15,7 @@ async def read_monitor(client,endpoint,request,state=None,store=None,eid=None):
         params = {}
         if endpoint.send_query_params:
             for argument in endpoint.query_params:
-                if argument.source == 'run_history_json':
-                    value = [store.public_run(run) for run in store.runs(eid)]
-                elif argument.source == 'current_run_json':
+                if argument.source == 'current_run_json':
                     runs = store.runs(eid, limit=1)
                     value = store.public_run(runs[0]) if runs else None
                 else:

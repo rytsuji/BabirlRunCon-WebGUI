@@ -53,10 +53,19 @@ class RunControlEndpoint(Endpoint):
 
 class QueryArgument(Strict):
     name: str = Field(pattern=r'^[A-Za-z_][A-Za-z0-9_]{0,63}$')
-    source: Literal['runname','runnumber','header','event_num','start_time','stop_time','state','getconfig_json','run_history_json','current_run_json']
+    source: Literal['runname','runnumber','header','event_num','start_time','stop_time','state','getconfig_json','current_run_json']
 
 class EnabledEndpoint(Endpoint):
     enabled: bool = True
+
+    @model_validator(mode='before')
+    @classmethod
+    def remove_retired_history_arguments(cls, value):
+        if isinstance(value, dict) and isinstance(value.get('query_params'), list):
+            return {**value, 'query_params': [
+                arg for arg in value['query_params']
+                if not isinstance(arg, dict) or arg.get('source') != 'run_history_json']}
+        return value
 
 
 class Hook(EnabledEndpoint):
@@ -89,7 +98,7 @@ class MonitorEndpoint(EnabledEndpoint):
 
 
 class ManualArgument(QueryArgument):
-    source: Literal['custom','runname','runnumber','header','event_num','start_time','stop_time','state','getconfig_json','run_history_json','current_run_json'] = 'custom'
+    source: Literal['custom','runname','runnumber','header','event_num','start_time','stop_time','state','getconfig_json','current_run_json'] = 'custom'
     placeholder: str = Field(default='',max_length=1000)
 
 
