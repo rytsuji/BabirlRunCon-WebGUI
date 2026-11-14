@@ -404,10 +404,13 @@ class ControlService:
                 except Exception as exc:
                     restart_errors.append(str(exc) or type(exc).__name__)
                 async def refresh_after_restart():
-                    reader=getattr(self.controller,'snapshot',self.controller.status)
-                    state=await reader(eid,config)
-                    if self.monitor:self.monitor.publish(eid,config,state)
-                    return state
+                    if self.monitor:
+                        # Match Run overview Refresh, including EB/ES counter reads.
+                        observed=await self.monitor.read(eid,config,refresh=True)
+                        if not observed['connected']:
+                            raise RuntimeError(observed.get('error') or 'DAQ refresh failed after Restart')
+                        return observed['state']
+                    return await self.controller.status(eid,config)
                 try:
                     await self.step(eid,op,'Refresh DAQ configuration after Restart',refresh_after_restart)
                 except Exception as exc:
