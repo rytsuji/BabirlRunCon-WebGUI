@@ -129,7 +129,7 @@ class ControlService:
             self.monitor.es_connections[eid] = result
         return result
 
-    async def step(self, eid, op, name, callback):
+    async def step(self, eid, op, name, callback, record_control_error=True):
         step = {"name": name, "status": "running", "started_at": now(),
                 "finished_at": None, "response": None}
         op["steps"].append(step)
@@ -145,18 +145,20 @@ class ControlService:
                         error=str(exc) or "Operation interrupted")
             if isinstance(exc, RemoteAPIError):
                 step["response"] = exc.response
-            if op['action'] in ('start','nssta','stop') and not self.is_timeout(exc) and not op.get('cancel_reason'):
+            if record_control_error and op['action'] in ('start','nssta','stop') and not self.is_timeout(exc) and not op.get('cancel_reason'):
                 self.store.retain_control_error(eid,op,name+': '+step['error'])
             raise
         finally:
             step["finished_at"] = now()
             self.persist(eid, op)
 
-    async def hooks(self, eid, config, op, hooks, nssta=False, state=None):
+    async def hooks(self, eid, config, op, hooks, nssta=False, state=None, timing=None, best_effort=False):
+        if timing is not None:
+            hooks=[hook for hook in hooks if hook.timing==timing]
         # Operation preflight/Stop verification already obtained a fresh snapshot.
         # Resolve a whole hook batch from that snapshot, not once per endpoint.
         if state is None and any(h.enabled and (not nssta or h.run_on_nssta) and getattr(h,'send_query_params',False) and h.query_params for h in hooks):
-            state=await self.controller.status(eid,config)
+            state=(self.monitor.arguments(eid,config) if self.monitor else {}) if best_effort else await self.controller.status(eid,config)
         for hook in hooks:
             if not hook.enabled:continue
             if nssta and not hook.run_on_nssta:
@@ -185,7 +187,13 @@ class ControlService:
                 return await invoke_hook(self.client, hook, self.settings.operation_timeout_sec,
                                          progress,query_params if getattr(hook,'argument_transport','query')=='query' else None,
                                          query_params if getattr(hook,'send_query_params',False) and hook.argument_transport=='json' else None)
-            await self.step(eid, op, hook.name, invoke)
+            name=f'{timing.title()} {op["action"].upper()} API: {hook.name}' if timing else hook.name
+            try:
+                await self.step(eid, op, name, invoke, record_control_error=not best_effort)
+            except Exception as exc:
+                if not best_effort:raise
+                op.setdefault('api_warnings',[]).append({'name':hook.name,'timing':timing,'error':str(exc) or type(exc).__name__})
+                self.persist(eid,op)
 
     async def wait_state(self, eid, config, allowed, include_events=True):
         reader=self.controller.status if include_events else getattr(self.controller,'snapshot',self.controller.status)
@@ -263,7 +271,7 @@ class ControlService:
                        "daq_config": before["raw_config"], "event_num": before["event_num"],
                        "es_event_num": before["es_event_num"]}
                 self.store.put_run(eid, run)
-                await self.hooks(eid, config, op, config.start_api, action == "nssta", state=before)
+                await self.hooks(eid, config, op, config.start_api, action == "nssta", state=before,timing='before',best_effort=True)
                 await self.check_state(eid, config, {"stopped"})
                 await self.connections(eid,config,False)
                 # From this point a lost response can mean DAQ actually started.
@@ -280,8 +288,15 @@ class ControlService:
                            event_num=state["event_num"], es_event_num=state["es_event_num"])
                 self.store.put_run(eid, run)
                 self.store.remember(eid, state)
+                op['daq_completed']=True
+                await self.hooks(eid,config,op,config.start_api,action=='nssta',state=state,timing='after',best_effort=True)
             elif action == "stop":
                 run = self.store.active_run(eid)
+                from models import ExperimentConfig
+                run_config=ExperimentConfig.model_validate(run.get('config_snapshot') or config.model_dump()) if run else config
+                mode=run['mode'] if run else 'start'
+                before=self.monitor.arguments(eid,config) if self.monitor else {}
+                await self.hooks(eid,run_config,op,run_config.stop_api,mode=='nssta',state=before,timing='before',best_effort=True)
                 # Preserve already displayed errors without delaying Stop for a read.
                 cached=self.monitor.cache.get(eid,{}) if self.monitor else {}
                 for message in (cached.get('state',{}).get('acquisition_errors') or {}).values():
@@ -326,20 +341,13 @@ class ControlService:
                          'started_at':state['start_time'],'config_snapshot':config.model_dump(),
                          'externally_started':True}
                 mode=run['mode']
-                from models import ExperimentConfig
-                run_config=ExperimentConfig.model_validate(run.get('config_snapshot') or config.model_dump())
-                run.update(status="stopped", finished_at=state["stop_time"],
+                run.update(status="completed", finished_at=state["stop_time"],
                            daq_config=state["raw_config"], event_num=state["event_num"], es_event_num=state["es_event_num"])
                 self.store.put_run(eid, run)
                 self.store.remember(eid, state)
-                try:
-                    await self.hooks(eid, run_config, op, run_config.stop_api, mode == "nssta", state=state)
-                except BaseException:
-                    run["status"] = "postprocess_failed"
-                    self.store.put_run(eid, run)
-                    raise
-                run["status"] = "completed"
-                self.store.put_run(eid, run)
+                self.store.clear_control_errors(eid)
+                op['daq_completed']=True
+                await self.hooks(eid,run_config,op,run_config.stop_api,mode=='nssta',state=state,timing='after',best_effort=True)
             elif action == "restart":
                 restart_errors=[]
                 try:
@@ -416,12 +424,13 @@ class ControlService:
                 except Exception as exc:
                     restart_errors.append(str(exc) or type(exc).__name__)
                 if restart_errors:raise RuntimeError('\n'.join(restart_errors))
-            op.update(status="succeeded", message="Completed")
+            op.update(status="succeeded", message="Completed with API warnings (see steps)" if op.get('api_warnings') else "Completed")
             if action in ('stop','restart'):
                 self.store.clear_control_errors(eid)
         except asyncio.CancelledError:
-            op.update(status="unknown", message=op.get('cancel_reason',"Web backend stopped. Verify DAQ state before proceeding."))
-            if run:
+            op.update(status="succeeded" if op.get('daq_completed') else "unknown",
+                      message="DAQ completed; remaining APIs cancelled." if op.get('daq_completed') else op.get('cancel_reason',"Web backend stopped. Verify DAQ state before proceeding."))
+            if run and not op.get('daq_completed'):
                 run.update(status='unknown',error='Operation interrupted before completion; verify DAQ state.')
                 self.store.put_run(eid,run)
             raise

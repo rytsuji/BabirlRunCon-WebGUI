@@ -41,6 +41,16 @@ pending, one refresh is queued. DAQ arguments wait for the first Run overview da
 and then use its shared snapshot.
 Use Send DAQ arguments to pass shared Run overview values, getconfig or Run history as
 query parameters to a Monitor API. JSON objects are encoded as JSON strings.
+Choose **Before Start** or **After Start** for each Start API, and **Before Stop**
+or **After Stop** for each Stop API. Existing APIs default to Before Start and
+After Stop. APIs run in list order within each timing. Their failures and timeouts
+are shown in Operation but do not fail DAQ control or prevent later APIs.
+After APIs run only when the DAQ transition completes. Run history is marked
+completed before After Stop APIs run, so Latest Run History (JSON) includes the
+completed record for ELOG posts. Enable Also run for NSSTA to use an API for NSSTA.
+Before Stop arguments use the latest shared overview without delaying Stop for
+another DAQ read.
+
 Uncheck Enabled to pause additional APIs while keeping their settings.
 The Run Control API is always enabled.
 

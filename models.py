@@ -81,6 +81,14 @@ class Hook(EnabledEndpoint):
         return self
 
 
+class StartHook(Hook):
+    timing: Literal['before','after'] = 'before'
+
+
+class StopHook(Hook):
+    timing: Literal['before','after'] = 'after'
+
+
 class MonitorEndpoint(EnabledEndpoint):
     send_query_params: bool = False
     query_params: list[QueryArgument] = Field(default_factory=list, max_length=32)
@@ -138,8 +146,8 @@ class ExperimentConfig(Strict):
     eb: EB
     run_control_api: RunControlEndpoint
     restart_api: list[EnabledEndpoint] = Field(default_factory=list, max_length=100)
-    start_api: list[Hook] = Field(default_factory=list, max_length=100)
-    stop_api: list[Hook] = Field(default_factory=list, max_length=100)
+    start_api: list[StartHook] = Field(default_factory=list, max_length=100)
+    stop_api: list[StopHook] = Field(default_factory=list, max_length=100)
     monitor_api: list[MonitorEndpoint] = Field(default_factory=list,max_length=100)
     manual_api: list[ManualEndpoint] = Field(default_factory=list,max_length=100)
     babimo: Babimo = Field(default_factory=Babimo)
