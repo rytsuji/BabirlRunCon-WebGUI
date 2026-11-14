@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261114-history-json-28";
+const GUI_BUILD = "v1-20261114-connections-29";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));

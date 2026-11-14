@@ -48,7 +48,9 @@ class Monitor:
         entry=self.cache.get(eid)
         if entry is not None and state.get('raw_config'):
             entry['state']=copy.deepcopy(state)
-            if metadata:entry.update(snapshot_at=now(),connected=True,error=None)
+            if metadata:
+                entry.update(snapshot_at=now(),connected=True,error=None,
+                             eb_connection={'connected':True,'error':None})
 
     def invalidate(self, eid):
         self.cache.clear()  # Other experiment pages may share the same EB.
@@ -91,8 +93,14 @@ class Monitor:
                     self.last_counters[eid]={key:copy.deepcopy(entry['state'].get(key)) for key in ('runname','runnumber','event_num','es_event_num','acquisition_errors')}
                     entry["connected"] = connected and entry["snapshot_at"] is not None
                     entry["error"] = None if entry["connected"] else "EB event read failed; waiting for recovery."
+                    entry["eb_connection"] = {"connected":entry["connected"],"error":entry["error"]}
+                    if not connected:
+                        # A slow ES request may hold the API's counter lock.
+                        # getconfig uses an independent EB-only read path.
+                        await self.snapshot(eid,config,entry)
                 except Exception as exc:
-                    entry.update(connected=False, error=str(exc))
+                    entry.update(connected=False, error=str(exc),
+                                 eb_connection={"connected":False,"error":str(exc)})
                 entry["events_at"] = now()
                 entry["next_events"] = time.monotonic() + config.run_control_api.event_poll_interval_sec
             result = copy.deepcopy(entry)
@@ -111,8 +119,9 @@ class Monitor:
                 except Exception as exc:
                     if epoch == self.epoch:
                         self.es_connections[eid]={'supported':True,'items':[],'error':str(exc)}
-                        entry.update(connected=False,error=str(exc),connection_checked_at=now())
-                        entry['eb_connection']={'connected':False,'error':str(exc)}
+                        # This request checks ES connections. Its failure cannot
+                        # invalidate the independent EB snapshot/counter read.
+                        entry['connection_checked_at']=now()
                         if hasattr(self.adapter,'probe_api'):entry['api_connection']=await self.adapter.probe_api(config)
                         result=copy.deepcopy(entry)
             if epoch != self.epoch:

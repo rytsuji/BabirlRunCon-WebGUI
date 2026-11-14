@@ -24,7 +24,7 @@ from monitor import Monitor
 from service import ControlService
 from storage import Store, now
 
-BUILD_ID = "v1-20261114-history-json-28"
+BUILD_ID = "v1-20261114-connections-29"
 BASE = Path(__file__).resolve().parent
 
 
