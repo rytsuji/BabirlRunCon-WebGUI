@@ -143,6 +143,20 @@ class Babimo(Strict):
         return [name for name in ('babinfo','babild','babissm','babian') if getattr(self,name)]
 
 
+class Link(Strict):
+    title: str = Field(min_length=1,max_length=200)
+    link: str = Field(min_length=1,max_length=2048)
+
+    @field_validator('link')
+    @classmethod
+    def valid_link(cls,value):
+        parsed=urlsplit(value)
+        if parsed.scheme not in ('http','https') or not parsed.hostname:
+            raise ValueError('An http(s) link is required')
+        _=parsed.port
+        return value
+
+
 class ExperimentConfig(Strict):
     experiment: Experiment
     eb: EB
@@ -152,6 +166,7 @@ class ExperimentConfig(Strict):
     stop_api: list[StopHook] = Field(default_factory=list, max_length=100)
     monitor_api: list[MonitorEndpoint] = Field(default_factory=list,max_length=100)
     manual_api: list[ManualEndpoint] = Field(default_factory=list,max_length=100)
+    links: list[Link] = Field(default_factory=list,max_length=100)
     babimo: Babimo = Field(default_factory=Babimo)
 
     @field_validator("restart_api", "start_api", "stop_api", "monitor_api", "manual_api", mode="before")

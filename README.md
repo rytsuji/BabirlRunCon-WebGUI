@@ -104,6 +104,9 @@ EF List, HD List and babissm tabs reuse the shared snapshot for display; use the
 Refresh buttons to read the latest DAQ settings. Writes always check the live DAQ
 state and verify their results.
 
+Register a **Title** and **Link** under **Links** in Edit configuration.
+The **Link** tab is always shown at the end of the tabs and opens links in a new tab.
+
 In **Edit configuration**, expand the **APIs** groups to edit individual APIs.
 Add a **History comment** before Save to keep a commented snapshot, including when
 the configuration is unchanged. Restore a snapshot using **Restore this configuration**.
