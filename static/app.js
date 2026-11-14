@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261114-connections-29";
+const GUI_BUILD = "v1-20261114-restart-refresh-30";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -522,7 +522,7 @@ async function controlPage(eid, config, version, revision) {
       for (const [id,value] of [["live-name",state.runname],["live-number",runNumber(state.runnumber)],["live-events",state.event_num == null ? null : Number(state.event_num).toLocaleString()],["live-header",state.header],["live-ender",state.ender || "—"],["live-start",formatTime(state.start_time)],["live-stop",formatTime(state.stop_time)]]) $("#"+id).textContent = value ?? "—";
       renderLiveConfig();
       $("#es-counters").innerHTML = formatESCounters(state.es_event_num,state.ef_info);
-      $("#last-checked").textContent = `Snapshot ${formatTime(status.snapshot_at)} · counters ${formatTime(status.events_at)} · ${config.run_control_api.event_poll_interval_sec ?? 2}s`;
+      $("#last-checked").textContent = `Counters ${formatTime(status.events_at)} · ${config.run_control_api.event_poll_interval_sec ?? 2}s`;
       const errors = state.acquisition_errors || {};
       $("#acquisition-warning").hidden = !Object.keys(errors).length;
       $("#acquisition-warning").textContent = "Some details could not be read: " + Object.values(errors).join("; ");

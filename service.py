@@ -403,6 +403,15 @@ class ControlService:
                     await self.step(eid,op,'Check ES connections after Restart',verify_after_restart)
                 except Exception as exc:
                     restart_errors.append(str(exc) or type(exc).__name__)
+                async def refresh_after_restart():
+                    reader=getattr(self.controller,'snapshot',self.controller.status)
+                    state=await reader(eid,config)
+                    if self.monitor:self.monitor.publish(eid,config,state)
+                    return state
+                try:
+                    await self.step(eid,op,'Refresh DAQ configuration after Restart',refresh_after_restart)
+                except Exception as exc:
+                    restart_errors.append(str(exc) or type(exc).__name__)
                 if restart_errors:raise RuntimeError('\n'.join(restart_errors))
             op.update(status="succeeded", message="Completed")
             if action in ('stop','restart'):
