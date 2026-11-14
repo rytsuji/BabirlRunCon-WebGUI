@@ -168,3 +168,5 @@
 #run-history>tr>td.wrap{min-width:0;white-space:pre-wrap;overflow-wrap:anywhere}
 #run-history>tr>td.actions{display:table-cell;white-space:nowrap}
 #run-history>tr>td.actions>.button+.button{margin-left:6px}
+
+#view-links a{color:var(--blue);text-decoration:underline;text-underline-offset:3px}
