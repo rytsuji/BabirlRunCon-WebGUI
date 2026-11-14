@@ -349,6 +349,7 @@ class ControlService:
                             await self.step(eid,op,'Restart selected babimo processes',lambda:self.controller.restart_daemons(eid,config,force_restart=op.get('force_restart',False),timeout_recovery=op.get('timeout_recovery',False),wait_timeout_sec=op.get('recovery_timeout_sec',30)))
                         except Exception as exc:
                             restart_errors.append(str(exc) or type(exc).__name__)
+                        await self.step(eid,op,'Wait 1 second after babimo restart',lambda:asyncio.sleep(1))
                     # Restart hooks are unconditional and do not carry run_on_nssta.
                     for hook in config.restart_api:
                         if not hook.enabled:continue
