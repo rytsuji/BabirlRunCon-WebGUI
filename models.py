@@ -83,10 +83,12 @@ class Hook(EnabledEndpoint):
 
 class StartHook(Hook):
     timing: Literal['before','after'] = 'before'
+    after_on: Literal['success','always'] = 'success'
 
 
 class StopHook(Hook):
     timing: Literal['before','after'] = 'after'
+    after_on: Literal['success','always'] = 'success'
 
 
 class MonitorEndpoint(EnabledEndpoint):

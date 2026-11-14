@@ -132,6 +132,7 @@ class ControlService:
     async def step(self, eid, op, name, callback, record_control_error=True):
         step = {"name": name, "status": "running", "started_at": now(),
                 "finished_at": None, "response": None}
+        if not record_control_error:step['optional']=True
         op["steps"].append(step)
         op["message"] = name
         self.persist(eid, op)
@@ -152,7 +153,7 @@ class ControlService:
             step["finished_at"] = now()
             self.persist(eid, op)
 
-    async def hooks(self, eid, config, op, hooks, nssta=False, state=None, timing=None, best_effort=False):
+    async def hooks(self, eid, config, op, hooks, nssta=False, state=None, timing=None, best_effort=False, run_record=...):
         if timing is not None:
             hooks=[hook for hook in hooks if hook.timing==timing]
         # Operation preflight/Stop verification already obtained a fresh snapshot.
@@ -172,8 +173,12 @@ class ControlService:
                     for argument in hook.query_params:
                         if argument.source=='getconfig_json':value=state.get('raw_config')
                         elif argument.source=='current_run_json':
-                            runs=self.store.runs(eid,limit=1)
-                            value=self.store.public_run(runs[0]) if runs else None
+                            if run_record is ...:
+                                runs=self.store.runs(eid,limit=1)
+                                value=self.store.public_run(runs[0]) if runs else None
+                            else:
+                                # Never substitute a previous Run for a failed attempt.
+                                value=self.store.public_run(run_record) if run_record is not None else None
                         else:value=state.get(argument.source)
                         if value is None:raise RuntimeError(f'DAQ value is unavailable: {argument.source}')
                         query_params[argument.name]=value if hook.argument_transport=='json' else json.dumps(value,ensure_ascii=False,separators=(',',':')) if isinstance(value,(dict,list)) else str(value)
@@ -259,6 +264,10 @@ class ControlService:
     async def execute(self, eid, config, op, header):
         run = None
         action = op["action"]
+        hook_config=config
+        hook_nssta=action=='nssta'
+        command_attempted=False
+        after_started=False
         op["status"] = "running"
         self.persist(eid, op)
         try:
@@ -278,6 +287,8 @@ class ControlService:
                 run["status"] = "unknown"
                 self.store.put_run(eid, run)
                 async def send_start():
+                    nonlocal command_attempted
+                    command_attempted=True
                     await self.step(eid, op, "DAQ NSSTA" if action == "nssta" else "DAQ Start",
                                     lambda: self.controller.start(eid, config, header, action == "nssta"))
                     return await self.step(eid, op, "Verify DAQ started",
@@ -289,12 +300,15 @@ class ControlService:
                 self.store.put_run(eid, run)
                 self.store.remember(eid, state)
                 op['daq_completed']=True
-                await self.hooks(eid,config,op,config.start_api,action=='nssta',state=state,timing='after',best_effort=True)
+                after_started=True
+                await self.hooks(eid,config,op,config.start_api,action=='nssta',state=state,timing='after',best_effort=True,run_record=run)
             elif action == "stop":
                 run = self.store.active_run(eid)
                 from models import ExperimentConfig
                 run_config=ExperimentConfig.model_validate(run.get('config_snapshot') or config.model_dump()) if run else config
                 mode=run['mode'] if run else 'start'
+                hook_config=run_config
+                hook_nssta=mode=='nssta'
                 before=self.monitor.arguments(eid,config) if self.monitor else {}
                 await self.hooks(eid,run_config,op,run_config.stop_api,mode=='nssta',state=before,timing='before',best_effort=True)
                 # Preserve already displayed errors without delaying Stop for a read.
@@ -307,6 +321,8 @@ class ControlService:
                 self.persist(eid,op)
 
                 async def send_and_confirm():
+                    nonlocal command_attempted
+                    command_attempted=True
                     # Always attempt Stop first; an unavailable snapshot must never block it.
                     try:
                         receipt=await self.step(eid,op,'DAQ Stop',lambda:self.controller.stop(eid,config,ender=op['ender']) if op.get('ender') else self.controller.stop(eid,config))
@@ -347,7 +363,8 @@ class ControlService:
                 self.store.remember(eid, state)
                 self.store.clear_control_errors(eid)
                 op['daq_completed']=True
-                await self.hooks(eid,run_config,op,run_config.stop_api,mode=='nssta',state=state,timing='after',best_effort=True)
+                after_started=True
+                await self.hooks(eid,run_config,op,run_config.stop_api,mode=='nssta',state=state,timing='after',best_effort=True,run_record=run)
             elif action == "restart":
                 restart_errors=[]
                 try:
@@ -435,10 +452,12 @@ class ControlService:
                 self.store.put_run(eid,run)
             raise
         except Exception as exc:
-            uncertain = isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TransportError)) or any(s["status"] == "unknown" for s in op["steps"])
-            op.update(status="unknown" if uncertain else "failed", message=str(exc) or type(exc).__name__)
+            uncertain = isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TransportError)) or any(s["status"] == "unknown" and not s.get('optional') for s in op["steps"])
+            outcome="unknown" if uncertain else "failed"
+            failure_message=str(exc) or type(exc).__name__
             if action=='stop' and isinstance(exc,asyncio.TimeoutError):
-                op['message']='Stop could not be confirmed before the operation timeout.'
+                failure_message='Stop could not be confirmed before the operation timeout.'
+            op['message']=failure_message
             if action in ('start','nssta','stop'):
                 self.store.retain_control_error(eid,op,op['message'])
             if run:
@@ -446,6 +465,15 @@ class ControlService:
                     run["status"] = "failed"
                 run["error"] = op["message"]
                 self.store.put_run(eid, run)
+            try:
+                if command_attempted and not after_started and action in ('start','nssta','stop'):
+                    hooks=hook_config.stop_api if action=='stop' else hook_config.start_api
+                    hooks=[hook for hook in hooks if hook.after_on=='always']
+                    state=self.monitor.arguments(eid,config) if self.monitor else {}
+                    # Persist the error first, then post that exact Run to ELOG.
+                    await self.hooks(eid,hook_config,op,hooks,hook_nssta,state=state,timing='after',best_effort=True,run_record=run)
+            finally:
+                op.update(status=outcome,message=failure_message)
         finally:
             op["finished_at"] = now()
             self.persist(eid, op)

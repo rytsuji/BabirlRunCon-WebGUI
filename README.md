@@ -45,9 +45,12 @@ Choose **Before Start** or **After Start** for each Start API, and **Before Stop
 or **After Stop** for each Stop API. Existing APIs default to Before Start and
 After Stop. APIs run in list order within each timing. Their failures and timeouts
 are shown in Operation but do not fail DAQ control or prevent later APIs.
-After APIs run only when the DAQ transition completes. Run history is marked
-completed before After Stop APIs run, so Latest Run History (JSON) includes the
-completed record for ELOG posts. Enable Also run for NSSTA to use an API for NSSTA.
+For After APIs, choose **Success only** (default) or **Success or failure**.
+The latter also posts when an attempted DAQ command fails. Rejected preflight
+checks do not create a Run or post an unrelated previous Run. A timeout warning
+while waiting is not a final outcome; After APIs run once the operation finishes.
+Run history is saved before posting. Successful Stop posts a completed record;
+failure posts its last saved information and error, which may lack final DAQ values. Enable Also run for NSSTA to use an API for NSSTA.
 Before Stop arguments use the latest shared overview without delaying Stop for
 another DAQ read.
 
