@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261115-rate-units-37";
+const GUI_BUILD = "v1-20261115-history-order-38";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -199,11 +199,11 @@ function newExperimentPage(copyConfig=null) {
 }
 
 function runHistoryPanel(standalone = false) {
-  return `<section id="view-history" class="panel section" ${standalone ? '' : 'role="tabpanel" aria-labelledby="tab-history" hidden'}><div class="panel-head"><h2>Run history</h2><label class="actions">Mode <select id="history-mode" class="input"><option value="saved" selected>Saved</option><option value="nssta">NSSTA</option><option value="all">All</option></select></label></div><p id="history-error" class="notice amber" hidden></p><div class="table-scroll"><table><thead><tr><th>Run</th><th>Mode</th><th>Header</th><th>Ender</th><th>Start / Stop time</th><th>Duration</th><th>Status</th><th></th></tr></thead><tbody id="run-history"><tr><td colspan="8" class="empty-cell">No recorded Runs yet.</td></tr></tbody></table></div></section>`;
+  return `<section id="view-history" class="panel section" ${standalone ? '' : 'role="tabpanel" aria-labelledby="tab-history" hidden'}><div class="panel-head"><h2>Run history</h2><label class="actions">Mode <select id="history-mode" class="input"><option value="saved" selected>Saved</option><option value="nssta">NSSTA</option><option value="all">All</option></select></label></div><p id="history-error" class="notice amber" hidden></p><div class="table-scroll"><table><thead><tr><th>Run Name</th><th>Run Number</th><th>Status</th><th>Start / Stop Time</th><th>Duration</th><th>Events</th><th>Header</th><th>Ender</th><th></th></tr></thead><tbody id="run-history"><tr><td colspan="9" class="empty-cell">No recorded Runs yet.</td></tr></tbody></table></div></section>`;
 }
 
 function renderRunHistory(runs) {
-  $("#run-history").innerHTML = runs.map((run,index) => `<tr><td><strong>${html(run.runname)}</strong> <span class="mono muted">${runNumber(run.runnumber)}</span></td><td>${run.mode === "nssta" ? "NSSTA" : "Saved"}</td><td class="wrap">${html(run.header)}</td><td class="wrap">${html(run.ender || "")}</td><td><div class="run-time"><span class="run-time-label">Start</span>${html(formatTime(run.started_at))}</div><div class="run-time"><span class="run-time-label">Stop</span>${html(formatTime(run.finished_at))}</div></td><td class="mono">${html(runDuration(run))}</td><td>${pill(run.status, ["completed","stopped"].includes(run.status) ? "green" : run.status === "running" ? "blue" : ["failed","postprocess_failed","unknown"].includes(run.status) ? "red" : "")}</td><td class="actions"><button class="button small" data-inspect="${index}" aria-expanded="false">Details ↓</button><button class="button small" data-history-json="${index}" aria-expanded="false">JSON ↓</button></td></tr><tr id="run-detail-${index}" hidden><td colspan="8"><div class="run-expanded">${formatDAQ(runDownload(run))}</div></td></tr>`).join("") || `<tr><td colspan="8" class="empty-cell">No Runs match this mode.</td></tr>`;
+  $("#run-history").innerHTML = runs.map((run,index) => `<tr><td class="wrap"><strong>${html(run.runname)}</strong></td><td class="mono">${runNumber(run.runnumber)}</td><td>${pill(run.status, ["completed","stopped"].includes(run.status) ? "green" : run.status === "running" ? "blue" : ["failed","postprocess_failed","unknown"].includes(run.status) ? "red" : "")}</td><td><div class="run-time"><span class="run-time-label">Start</span>${html(formatTime(run.started_at))}</div><div class="run-time"><span class="run-time-label">Stop</span>${html(formatTime(run.finished_at))}</div></td><td class="mono">${html(runDuration(run))}</td><td class="mono">${run.event_num == null ? "—" : html(Number(run.event_num).toLocaleString())}</td><td class="wrap">${html(run.header)}</td><td class="wrap">${html(run.ender || "")}</td><td class="actions"><button class="button small" data-inspect="${index}" aria-expanded="false">Details ↓</button><button class="button small" data-history-json="${index}" aria-expanded="false">JSON ↓</button></td></tr><tr id="run-detail-${index}" hidden><td colspan="9"><div class="run-expanded">${formatDAQ(runDownload(run))}</div></td></tr>`).join("") || `<tr><td colspan="9" class="empty-cell">No Runs match this mode.</td></tr>`;
   $("#run-history").querySelectorAll("[data-inspect], [data-history-json]").forEach(button => button.onclick = () => {
     const index=button.dataset.inspect ?? button.dataset.historyJson;
     const row=$("#run-detail-"+index), view=button.dataset.inspect!==undefined ? "details" : "json";
@@ -231,7 +231,7 @@ async function historyPage(eid, config, version) {
     const requested=++requestVersion;
     const selectedMode=$("#history-mode").value;
     $("#history-error").hidden=true;
-    $("#run-history").innerHTML='<tr><td colspan="8" class="empty-cell">Loading Runs…</td></tr>';
+    $("#run-history").innerHTML='<tr><td colspan="9" class="empty-cell">Loading Runs…</td></tr>';
     try {
       const result=await api(`/api/experiments/${encodeURIComponent(eid)}/history?mode=${selectedMode}`);
       if(version!==routeVersion || requested!==requestVersion)return;
@@ -348,7 +348,7 @@ async function controlPage(eid, config, version, revision) {
     };
   }
   selectTab("control");
-  $("#history-mode").onchange=()=>{historyMode=$("#history-mode").value;loadedHistoryVersion=null;$("#run-history").innerHTML='<tr><td colspan="8">Loading Runs…</td></tr>';poll();};
+  $("#history-mode").onchange=()=>{historyMode=$("#history-mode").value;loadedHistoryVersion=null;$("#run-history").innerHTML='<tr><td colspan="9">Loading Runs…</td></tr>';poll();};
   $("#refresh-connections").onclick = () => { connectionsRequested = true; forceConnections=true; refreshRequested = true; poll(); };
   $("#esconnect").onclick=async event=>{
     event.preventDefault();event.stopPropagation();
