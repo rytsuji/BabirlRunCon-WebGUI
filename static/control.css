@@ -70,9 +70,10 @@
 .control-page .restart-row{border-top:1px solid var(--line);margin-top:10px;padding-top:8px;align-items:center}
 .control-page .restart-row h3{font-size:12px}
 .control-page .restart-row p{font-size:10px;max-width:320px;margin-top:3px}
-.control-page .stat-grid{gap:12px;margin-bottom:18px}
-.control-page .stat-label{font-size:10px;margin-bottom:6px}
-.control-page .stat-value{font-size:25px}
+.control-page .stat-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:18px}
+.control-page .stat-grid>div{min-width:0}
+.control-page .stat-label{font-size:9px;margin-bottom:6px}
+.control-page .stat-value{font-size:21px}
 .control-page .detail-list{row-gap:10px;grid-template-columns:88px minmax(0,1fr)}
 .control-page .divider{margin:15px 0}
 .control-page #live-config{max-height:245px}
@@ -88,7 +89,7 @@
 .run-expanded>.daq-fields{grid-template-columns:120px minmax(0,1fr)}
 .control-page .footer{display:none}
 @media(max-width:850px){.control-workspace{grid-template-columns:minmax(0,1fr);grid-template-areas:"settings" "overview" "operation" "connections"}.container.control-page{padding-top:18px}.operation-panel #operation-body{max-height:230px}}
-@media(max-width:550px){.control-page .page-head{gap:12px;align-items:flex-start}.control-page h1{font-size:21px}.control-page .page-head>.button{font-size:10px;padding:7px 8px}.control-page .field-row{grid-template-columns:minmax(0,1fr) 115px}.run-settings-panel .recall-field{display:block}.run-settings-panel .recall-field label{margin-bottom:5px}.control-page .stat-value{font-size:21px}.control-page .control-actions .button{font-size:13px;padding:12px 6px}.control-page .restart-row{gap:10px}.control-page .restart-button{padding:10px;font-size:11px}.connection-address{font-size:11px}}
+@media(max-width:550px){.control-page .page-head{gap:12px;align-items:flex-start}.control-page h1{font-size:21px}.control-page .page-head>.button{font-size:10px;padding:7px 8px}.control-page .field-row{grid-template-columns:minmax(0,1fr) 115px}.run-settings-panel .recall-field{display:block}.run-settings-panel .recall-field label{margin-bottom:5px}.control-page .stat-value{font-size:18px}.control-page .stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.control-page .control-actions .button{font-size:13px;padding:12px 6px}.control-page .restart-row{gap:10px}.control-page .restart-button{padding:10px;font-size:11px}.connection-address{font-size:11px}}
 
 #top-connections{gap:6px;flex-wrap:wrap}.topbar{height:auto;min-height:58px;gap:12px;padding-top:12px;padding-bottom:12px}.top-right{gap:10px;flex-wrap:wrap}@media(max-width:700px){.topbar{flex-wrap:wrap}}
 

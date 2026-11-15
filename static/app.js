@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261115-history-duration-35";
+const GUI_BUILD = "v1-20261115-overview-rate-36";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -62,6 +62,24 @@ function formatTime(value) {
   const date = new Date(value);
   if (!Number.isNaN(date.getTime()) && date.getFullYear()<=1970) return "—";
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString(undefined, {hour12:false});
+}
+function createAverageRate() {
+  let previous=null, display="-";
+  return status=>{
+    const state=status?.state;
+    const reset=()=>{previous=null;display="-";return display;};
+    if (!status?.connected || state?.state!=="running" || state.event_num==null ||
+        state.acquisition_errors?.["/api/v1/run/events"] || !status.events_at) return reset();
+    const events=Number(state.event_num), sampled=Date.parse(status.events_at);
+    if (!Number.isFinite(events) || events<0 || !Number.isFinite(sampled)) return reset();
+    const key=JSON.stringify([state.runname,state.runnumber,state.start_time]);
+    if (previous?.key===key && sampled===previous.sampled && events===previous.events) return display;
+    const old=previous;
+    previous={key,events,sampled};
+    if (!old || old.key!==key || sampled<=old.sampled || events<old.events) return display="-";
+    const rate=(events-old.events)/((sampled-old.sampled)/1000);
+    return display=rate.toLocaleString(undefined,{maximumFractionDigits:1})+" Hz";
+  };
 }
 function pretty(value) { return html(JSON.stringify(value, null, 2)); }
 function footer() { return `<footer class="footer"><span>DAQ CONTROL / EXPERIMENT WORKSPACE</span><span>Connected API mode</span></footer>`; }
@@ -233,6 +251,7 @@ async function controlPage(eid, config, version, revision) {
   let historyMode = "saved", restartOverride=false, configView=null;
   let stopWaitStarted=null, stopWaitTicker=null, stopWaitId=null;
   let lastErrorSignature='', lastRestartFinished=null, lastTransitionId=null;
+  const averageRate=createAverageRate();
   let current = null, historyData = {runs:[], recall:{runs:[]}, operations:[]};
   let draftDirty = false, headerDirty = false, pending = false, historyError = "", refreshRequested = true, loadedHistoryVersion = null, connectionsRequested = true, forceConnections=false;
   app.classList.add("control-page");
@@ -264,7 +283,7 @@ async function controlPage(eid, config, version, revision) {
         <div class="restart-row"><div><h3>Restart DAQ</h3></div><button class="button restart-button" id="restart" disabled>↻ Restart DAQ</button></div>
       </div></section>
       <section class="panel overview-panel"><div class="panel-head"><h2>Run overview</h2><div class="actions"><button class="button small" id="refresh-snapshot">↻ Refresh</button><span id="daq-state">${pill("CONNECTING")}</span></div></div><div class="panel-body">
-        <div class="stat-grid"><div><div class="stat-label">RUN NAME</div><div class="stat-value" id="live-name">—</div></div><div><div class="stat-label">CURRENT NUMBER</div><div class="stat-value" id="live-number">—</div></div><div><div class="stat-label">EVENTS</div><div class="stat-value blue" id="live-events">—</div></div></div>
+        <div class="stat-grid"><div><div class="stat-label">RUN NAME</div><div class="stat-value" id="live-name">—</div></div><div><div class="stat-label">CURRENT NUMBER</div><div class="stat-value" id="live-number">—</div></div><div><div class="stat-label">EVENTS</div><div class="stat-value blue" id="live-events">—</div></div><div><div class="stat-label">AVERAGE RATE</div><div class="stat-value blue" id="live-rate" title="Event count difference / elapsed seconds between counter samples">-</div></div></div>
         <dl class="detail-list"><dt>Header</dt><dd id="live-header">—</dd><dt>Ender</dt><dd id="live-ender">—</dd><dt>Start time</dt><dd id="live-start">—</dd><dt>Stop time</dt><dd id="live-stop">—</dd></dl>
         <div id="es-counters" class="es-counters" aria-label="ES event counts"></div><div class="divider"></div><div class="actions"><button class="button small" id="show-config" aria-expanded="false" aria-controls="config-details">DAQ configuration</button><button class="button small" id="show-config-json" aria-expanded="false" aria-controls="config-details">DAQ configuration (JSON)</button></div><div id="config-details" hidden><div id="live-config" class="daq-format">Waiting for DAQ…</div></div>
         <p id="acquisition-warning" class="form-note error-text" hidden></p>
@@ -571,6 +590,7 @@ async function controlPage(eid, config, version, revision) {
         (es?.items || []).map(item => `<div class="es-connection-item ${item.enabled ? "" : "muted"}"><span>ES ${html(item.efn)}</span><span title="${html(item.host)}"><span class="es-mode">${html(normalizeEFMode(item.onoff ?? item.mode) ?? (item.enabled ? "UNKNOWN" : "OFF"))}</span> ${html(item.name || item.host)}</span><span class="${!item.enabled ? 'muted' : item.connect===1 ? 'es-status-connected' : item.connect===0 ? 'es-status-disconnected' : 'es-status-unknown'}">${item.enabled ? (item.connect === 1 ? "● Connected" : item.connect === 0 ? "○ connect=0" : "? Unknown") : "OFF · excluded"}</span>${item.error ? `<span class="error-text">${html(item.error)}</span>` : ""}</div>`).join("") || '<span class="muted">No ES configured</span>';
       $("#daq-state").innerHTML = statusPill(state.state);
       for (const [id,value] of [["live-name",state.runname],["live-number",runNumber(state.runnumber)],["live-events",state.event_num == null ? null : Number(state.event_num).toLocaleString()],["live-header",state.header],["live-ender",state.ender || "—"],["live-start",formatTime(state.start_time)],["live-stop",formatTime(state.stop_time)]]) $("#"+id).textContent = value ?? "—";
+      $("#live-rate").textContent = averageRate(status);
       renderLiveConfig();
       $("#es-counters").innerHTML = formatESCounters(state.es_event_num,state.ef_info);
       $("#last-checked").textContent = `Counters ${formatTime(status.events_at)} · ${config.run_control_api.event_poll_interval_sec ?? 2}s`;
@@ -605,6 +625,7 @@ async function controlPage(eid, config, version, revision) {
       renderOperation(status.active_operation || hist.operations[0]); controls(); utilities.updateStatus(status);
     } catch (error) {
       if (version !== routeVersion) return;
+      $("#live-rate").textContent = averageRate(null);
       current = null; manualAPIs.update(); monitorContext(); controls(); utilities.updateStatus(null);
       $("#connection").innerHTML = pill("UNKNOWN", "red");
       $("#api-connection").innerHTML = pill("UNKNOWN", "red");
