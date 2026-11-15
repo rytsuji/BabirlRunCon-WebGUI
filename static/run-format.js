@@ -35,6 +35,17 @@ function runSummary(record) {
     header:run.header ?? record.header, ender:run.ender ?? record.ender ?? "", started_at:run.startdate ?? record.started_at, finished_at:run.stopdate ?? record.finished_at};
 }
 
+function runDuration(record) {
+  const run=record.daq_config?.runinfo || {};
+  const start=Number(run.starttime)>0 ? Number(run.starttime)*1000 : Date.parse(record.started_at);
+  const stop=Number(run.stoptime)>0 ? Number(run.stoptime)*1000 : Date.parse(record.finished_at);
+  if(!Number.isFinite(start) || !Number.isFinite(stop) || stop<start ||
+     new Date(start).getFullYear()<=1970 || new Date(stop).getFullYear()<=1970)return '—';
+  const seconds=Math.floor((stop-start)/1000);
+  return [Math.floor(seconds/3600),Math.floor(seconds/60)%60,seconds%60]
+    .map(value=>String(value).padStart(2,'0')).join(':');
+}
+
 function runDownload(record) {
   // No UI-only fields, database keys, UUIDs, or duplicated snapshots.
   return {mode:record.mode,status:record.status,daq_config:record.daq_config,
@@ -79,4 +90,4 @@ function formatConfigChanges(current,previous,kind,currentES,previousES) {
   return `<p class="small-text">${keys.filter(changed).length} changed fields · highlighted</p><div class="config-diff-wrap"><table class="config-diff"><thead><tr><th>Field</th><th>Current</th><th>Previous</th></tr></thead>${rows}</table></div>`;
 }
 
-if (typeof module !== "undefined") module.exports = {runNumber,formatDAQ,runSummary,runDownload,formatESCounters,formatConfigChanges};
+if (typeof module !== "undefined") module.exports = {runNumber,formatDAQ,runSummary,runDuration,runDownload,formatESCounters,formatConfigChanges};
