@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261114-links-33";
+const GUI_BUILD = "v1-20261115-history-page-34";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -106,6 +106,7 @@ async function route() {
       const data = await api(`/api/experiments/${encodeURIComponent(eid)}/config`);
       if (version !== routeVersion) return;
       if (parts[2] === "edit") await editorPage(eid, data, version);
+      else if (parts[2] === "history") await historyPage(eid, data.config, version);
       else await controlPage(eid, data.config, version, data.revision);
     } else if (new URLSearchParams(location.search).has("new")) {
       const copyID=new URLSearchParams(location.search).get("copy");
@@ -133,7 +134,7 @@ async function indexPage(version) {
         <div class="card-title"><h2>${html(exp.name)}</h2>${exp.error ? pill("CONFIG ERROR","red") : exp.active_operation ? pill("BUSY","blue") : pill("READY")}</div>
         <p class="card-description">${html(exp.error || exp.description || "No description provided.")}</p>
         <div class="card-footer"><span class="small-text muted">${html(exp.eb?.name || "—")} <span class="mono">${html(exp.eb?.host || "")}</span></span>
-        <div class="actions">${exp.error ? "" : `<a class="button small" href="/?new=1&amp;copy=${encodeURIComponent(exp.id)}">Copy</a>`}<button class="button small" data-delete="${html(exp.id)}">Delete</button>${exp.error ? "" : `<a class="button text" href="/experiments/${encodeURIComponent(exp.id)}/edit">Edit config</a><a class="button" href="/experiments/${encodeURIComponent(exp.id)}">Open control <span>↗</span></a>`}</div></div>
+        <div class="actions"><a class="button small" href="/experiments/${encodeURIComponent(exp.id)}/history">Show Run History</a>${exp.error ? "" : `<a class="button small" href="/?new=1&amp;copy=${encodeURIComponent(exp.id)}">Copy</a>`}<button class="button small" data-delete="${html(exp.id)}">Delete</button>${exp.error ? "" : `<a class="button text" href="/experiments/${encodeURIComponent(exp.id)}/edit">Edit config</a><a class="button" href="/experiments/${encodeURIComponent(exp.id)}">Open control <span>↗</span></a>`}</div></div>
       </article>`).join("") || `<div class="panel panel-body"><p class="muted">No experiments yet. Create your first experiment to get started.</p></div>`}</div>
     <div class="index-note"><span>ⓘ</span><span>Each experiment keeps its own configuration and database. Opening a control page does not change DAQ settings.</span></div>${footer()}`;
   app.querySelectorAll('[data-delete]').forEach(button=>button.onclick=async()=>{
@@ -176,6 +177,55 @@ function newExperimentPage(copyConfig=null) {
       toast("Experiment created"); await navigate(`/experiments/${result.id}`);
     } catch (error) { toast(error.message,true); button.disabled = false; }
   };
+}
+
+function runHistoryPanel(standalone = false) {
+  return `<section id="view-history" class="panel section" ${standalone ? '' : 'role="tabpanel" aria-labelledby="tab-history" hidden'}><div class="panel-head"><h2>Run history</h2><label class="actions">Mode <select id="history-mode" class="input"><option value="saved" selected>Saved</option><option value="nssta">NSSTA</option><option value="all">All</option></select></label></div><p id="history-error" class="notice amber" hidden></p><div class="table-scroll"><table><thead><tr><th>Run</th><th>Mode</th><th>Header</th><th>Ender</th><th>Started</th><th>Status</th><th></th></tr></thead><tbody id="run-history"><tr><td colspan="7" class="empty-cell">No recorded Runs yet.</td></tr></tbody></table></div></section>`;
+}
+
+function renderRunHistory(runs) {
+  $("#run-history").innerHTML = runs.map((run,index) => `<tr><td><strong>${html(run.runname)}</strong> <span class="mono muted">${runNumber(run.runnumber)}</span></td><td>${run.mode === "nssta" ? "NSSTA" : "Saved"}</td><td class="wrap">${html(run.header)}</td><td class="wrap">${html(run.ender || "")}</td><td>${html(formatTime(run.started_at))}</td><td>${pill(run.status, ["completed","stopped"].includes(run.status) ? "green" : run.status === "running" ? "blue" : ["failed","postprocess_failed","unknown"].includes(run.status) ? "red" : "")}</td><td class="actions"><button class="button small" data-inspect="${index}" aria-expanded="false">Details ↓</button><button class="button small" data-history-json="${index}" aria-expanded="false">JSON ↓</button></td></tr><tr id="run-detail-${index}" hidden><td colspan="7"><div class="run-expanded">${formatDAQ(runDownload(run))}</div></td></tr>`).join("") || `<tr><td colspan="7" class="empty-cell">No Runs match this mode.</td></tr>`;
+  $("#run-history").querySelectorAll("[data-inspect], [data-history-json]").forEach(button => button.onclick = () => {
+    const index=button.dataset.inspect ?? button.dataset.historyJson;
+    const row=$("#run-detail-"+index), view=button.dataset.inspect!==undefined ? "details" : "json";
+    const close=!row.hidden && row.dataset.view===view;
+    const record=runDownload(runs[Number(index)]);
+    row.hidden=close;row.dataset.view=view;
+    row.querySelector(".run-expanded").innerHTML=view==="json"
+      ? `<pre class="raw-json">${html(JSON.stringify(record,null,2))}</pre>` : formatDAQ(record);
+    for(const item of button.parentElement.querySelectorAll("button")){
+      const selected=!close && item===button;
+      item.setAttribute("aria-expanded",String(selected));
+      item.textContent=(item.dataset.inspect!==undefined ? "Details" : "JSON")+(selected ? " ↑" : " ↓");
+    }
+  });
+}
+
+async function historyPage(eid, config, version) {
+  app.classList.add("control-page");
+  document.body.classList.add("compact-control");
+  $("#top-experiment").innerHTML=`<h1>${html(config.experiment.name)}</h1><p>${html(config.experiment.description)}</p>`;
+  $("#top-experiment").hidden=false;
+  app.innerHTML=runHistoryPanel(true)+footer();
+  let requestVersion=0;
+  async function loadHistory() {
+    const requested=++requestVersion;
+    const selectedMode=$("#history-mode").value;
+    $("#history-error").hidden=true;
+    $("#run-history").innerHTML='<tr><td colspan="7" class="empty-cell">Loading Runs…</td></tr>';
+    try {
+      const result=await api(`/api/experiments/${encodeURIComponent(eid)}/history?mode=${selectedMode}`);
+      if(version!==routeVersion || requested!==requestVersion)return;
+      renderRunHistory(result.runs.map(runSummary));
+    } catch(error) {
+      if(version!==routeVersion || requested!==requestVersion)return;
+      $("#history-error").hidden=false;
+      $("#history-error").textContent="Run history unavailable: "+error.message;
+      $("#run-history").innerHTML='';
+    }
+  }
+  $("#history-mode").onchange=loadHistory;
+  await loadHistory();
 }
 
 async function controlPage(eid, config, version, revision) {
@@ -221,7 +271,7 @@ async function controlPage(eid, config, version, revision) {
       </div><div class="panel-foot small-text muted" id="last-checked">Values are read from the DAQ controller.</div></section>
     </div>
     <section id="view-api" role="tabpanel" aria-labelledby="tab-api" class="section" hidden></section>
-    <section id="view-history" role="tabpanel" aria-labelledby="tab-history" class="panel section" hidden><div class="panel-head"><h2>Run history</h2><label class="actions">Mode <select id="history-mode" class="input"><option value="saved" selected>Saved</option><option value="nssta">NSSTA</option><option value="all">All</option></select></label></div><p id="history-error" class="notice amber" hidden></p><div class="table-scroll"><table><thead><tr><th>Run</th><th>Mode</th><th>Header</th><th>Ender</th><th>Started</th><th>Status</th><th></th></tr></thead><tbody id="run-history"><tr><td colspan="7" class="empty-cell">No recorded Runs yet.</td></tr></tbody></table></div></section>
+    ${runHistoryPanel()}
     <section id="view-links" role="tabpanel" aria-labelledby="tab-links" class="panel section" hidden><div class="panel-head"><h2>Link</h2></div><div class="table-scroll"><table><thead><tr><th>Title</th><th>Link</th></tr></thead><tbody>${(config.links || []).map(item=>`<tr><td class="wrap"><a href="${html(item.link)}" target="_blank" rel="noopener noreferrer">${html(item.title)}</a></td><td class="wrap">${html(item.link)}</td></tr>`).join('') || '<tr><td colspan="2" class="empty-cell">No links configured.</td></tr>'}</tbody></table></div></section>${footer()}`;
 
   const workspace=$("#view-control");
@@ -550,21 +600,7 @@ async function controlPage(eid, config, version, revision) {
         const selected = $("#recall").value;
         $("#recall").innerHTML = `<option value="">Choose a saved Run name…</option>` + hist.recall.runs.map((r,index) => `<option value="${index}">${html(r.name)} · ${runNumber(r.current_number)}</option>`).join("");
         $("#recall").value = selected;
-        $("#run-history").innerHTML = hist.runs.map((run,index) => `<tr><td><strong>${html(run.runname)}</strong> <span class="mono muted">${runNumber(run.runnumber)}</span></td><td>${run.mode === "nssta" ? "NSSTA" : "Saved"}</td><td class="wrap">${html(run.header)}</td><td class="wrap">${html(run.ender || "")}</td><td>${html(formatTime(run.started_at))}</td><td>${pill(run.status, ["completed","stopped"].includes(run.status) ? "green" : run.status === "running" ? "blue" : ["failed","postprocess_failed","unknown"].includes(run.status) ? "red" : "")}</td><td class="actions"><button class="button small" data-inspect="${index}" aria-expanded="false">Details ↓</button><button class="button small" data-history-json="${index}" aria-expanded="false">JSON ↓</button></td></tr><tr id="run-detail-${index}" hidden><td colspan="7"><div class="run-expanded">${formatDAQ(runDownload(run))}</div></td></tr>`).join("") || `<tr><td colspan="7" class="empty-cell">No Runs match this mode.</td></tr>`;
-        $("#run-history").querySelectorAll("[data-inspect], [data-history-json]").forEach(button => button.onclick = () => {
-          const index=button.dataset.inspect ?? button.dataset.historyJson;
-          const row=$("#run-detail-"+index), view=button.dataset.inspect!==undefined ? "details" : "json";
-          const close=!row.hidden && row.dataset.view===view;
-          const record=runDownload(historyData.runs[Number(index)]);
-          row.hidden=close;row.dataset.view=view;
-          row.querySelector(".run-expanded").innerHTML=view==="json"
-            ? `<pre class="raw-json">${html(JSON.stringify(record,null,2))}</pre>` : formatDAQ(record);
-          for(const item of button.parentElement.querySelectorAll("button")){
-            const selected=!close && item===button;
-            item.setAttribute("aria-expanded",String(selected));
-            item.textContent=(item.dataset.inspect!==undefined ? "Details" : "JSON")+(selected ? " ↑" : " ↓");
-          }
-        });
+        renderRunHistory(hist.runs);
       }
       renderOperation(status.active_operation || hist.operations[0]); controls(); utilities.updateStatus(status);
     } catch (error) {

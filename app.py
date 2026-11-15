@@ -24,7 +24,7 @@ from monitor import Monitor
 from service import ControlService
 from storage import Store, now
 
-BUILD_ID = "v1-20261114-links-33"
+BUILD_ID = "v1-20261115-history-page-34"
 BASE = Path(__file__).resolve().parent
 
 
@@ -661,6 +661,7 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
     @app.get("/")
     @app.get("/experiments/{eid}")
     @app.get("/experiments/{eid}/edit")
+    @app.get("/experiments/{eid}/history")
     async def page(eid: Optional[str] = None):
         return FileResponse(BASE / "static/index.html")
 

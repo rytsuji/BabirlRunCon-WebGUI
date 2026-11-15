@@ -104,6 +104,10 @@ EF List, HD List and babissm tabs reuse the shared snapshot for display; use the
 Refresh buttons to read the latest DAQ settings. Writes always check the live DAQ
 state and verify their results.
 
+Use **Show Run History** on an experiment card to view saved Runs without starting
+babirl or the Run Control API. This page uses the same Mode, Details and JSON views
+as the Run History tab and does not contact DAQ.
+
 Register a **Title** and **Link** under **Links** in Edit configuration.
 The **Link** tab is always shown at the end of the tabs and opens links in a new tab.
 
