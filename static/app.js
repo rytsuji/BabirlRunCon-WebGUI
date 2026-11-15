@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261115-overview-rate-36";
+const GUI_BUILD = "v1-20261115-rate-units-37";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -68,7 +68,7 @@ function createAverageRate() {
   return status=>{
     const state=status?.state;
     const reset=()=>{previous=null;display="-";return display;};
-    if (!status?.connected || state?.state!=="running" || state.event_num==null ||
+    if (!status?.connected || !["running","nssta"].includes(state?.state) || state.event_num==null ||
         state.acquisition_errors?.["/api/v1/run/events"] || !status.events_at) return reset();
     const events=Number(state.event_num), sampled=Date.parse(status.events_at);
     if (!Number.isFinite(events) || events<0 || !Number.isFinite(sampled)) return reset();
@@ -78,7 +78,8 @@ function createAverageRate() {
     previous={key,events,sampled};
     if (!old || old.key!==key || sampled<=old.sampled || events<old.events) return display="-";
     const rate=(events-old.events)/((sampled-old.sampled)/1000);
-    return display=rate.toLocaleString(undefined,{maximumFractionDigits:1})+" Hz";
+    const [scale,unit]=rate>=1e9 ? [1e9,"GHz"] : rate>=1e6 ? [1e6,"MHz"] : rate>=1e3 ? [1e3,"kHz"] : [1,"Hz"];
+    return display=(rate/scale).toLocaleString(undefined,{maximumSignificantDigits:3})+" "+unit;
   };
 }
 function pretty(value) { return html(JSON.stringify(value, null, 2)); }
