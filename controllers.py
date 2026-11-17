@@ -84,6 +84,7 @@ class HttpController:
     async def snapshot(self, eid, config):
         raw = await self.request(config, "GET", "/api/v1/run/config")
         state = self.decode_config(raw)
+        state['state_observed_at']=now()
 
         try:
             target = await self.client.get(config.run_control_api.api + "/api/v1/target",
@@ -93,6 +94,13 @@ class HttpController:
         except Exception as exc:
             state["acquisition_errors"]["target"] = str(exc)
         return LiveState.model_validate(state).model_dump()
+
+    async def run_state(self, eid, config):
+        raw=await self.request(config,'GET','/api/v1/run/state')
+        return {'state':{'IDLE':'stopped','START':'running','NSSTA':'nssta'}.get(raw['runstatus'],'unknown'),
+                'runnumber':raw['runnumber'],'start_time':daq_time(raw,'start'),
+                'stop_time':daq_time(raw,'stop'),'header':raw.get('header',''),
+                'state_observed_at':now()}
 
     async def events(self, eid, config):
         result = {"event_num": None, "es_event_num": {}, "acquisition_errors": {}, "eb_connected": True}
@@ -111,11 +119,20 @@ class HttpController:
         result["es_event_num"] = {str(item["efn"]): item for item in es.get("lastevtn", [])}
         return result
 
+    async def monitor_events(self,eid,config):
+        return await self.request(config,'GET','/api/v1/run/monitor-counters')
+
+    async def monitor_connections(self,eid,config,reconnect=False,idle_only=True):
+        if reconnect:raise RuntimeError('Monitoring never reconnects ES')
+        result=await self.request(config,'GET','/api/v1/run/monitor-connections')
+        return {**result,'supported':True,'checked_at':now()}
+
     async def status(self, eid, config):
         state = await self.snapshot(eid, config)
         counters = await self.events(eid, config)
         state.update(event_num=counters["event_num"], es_event_num=counters["es_event_num"])
         state["acquisition_errors"].update(counters["acquisition_errors"])
+        state['events_observed_at']=now()
         return LiveState.model_validate(state).model_dump()
 
     async def configure(self, eid, config, runname, runnumber):

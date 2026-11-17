@@ -10,7 +10,7 @@ class WaitingForOverview(ValueError):
     pass
 
 
-async def read_monitor(client,endpoint,request,state=None,store=None,eid=None):
+async def read_monitor(client,endpoint,request=None,state=None,store=None,eid=None):
     async def fetch():
         params = {}
         if endpoint.send_query_params:
@@ -40,6 +40,7 @@ async def read_monitor(client,endpoint,request,state=None,store=None,eid=None):
                     'message':str(payload.get('message') or payload.get('comment') or
                                   (f'HTTP {response.status_code}' if not response.is_success else ''))}
     async def disconnected():
+        if request is None:await asyncio.Future()
         while not await request.is_disconnected():await asyncio.sleep(.1)
     task=asyncio.create_task(asyncio.wait_for(fetch(),endpoint.timeout_sec))
     watcher=asyncio.create_task(disconnected())

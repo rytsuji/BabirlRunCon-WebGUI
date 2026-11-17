@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261115-history-order-38";
+const GUI_BUILD = "v1-20261116-background-monitoring-39";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -149,13 +149,24 @@ async function indexPage(version) {
     <div class="page-head"><div><h1>Experiments</h1><p class="subtitle">Choose an experiment to monitor and control your DAQ.</p></div><a class="button primary" href="/?new=1"><span>＋</span> New experiment</a></div>
     <div class="experiment-grid">${experiments.map(exp => `
       <article class="panel experiment-card">
-        <div class="actions" style="justify-content:space-between"><span class="server-icon" aria-hidden="true">▤</span></div>
+        <div class="actions" style="justify-content:space-between"><span class="server-icon" aria-hidden="true">▤</span><label class="check-label lock-switch"><input type="checkbox" role="switch" data-background-monitoring="${html(exp.id)}" ${exp.background_monitoring ? 'checked' : ''} ${exp.error ? 'disabled' : ''}>Background monitoring <span data-monitoring-state>${exp.background_monitoring ? 'ON' : 'OFF'}</span></label></div>
         <div class="card-title"><h2>${html(exp.name)}</h2>${exp.error ? pill("CONFIG ERROR","red") : exp.active_operation ? pill("BUSY","blue") : pill("READY")}</div>
         <p class="card-description">${html(exp.error || exp.description || "No description provided.")}</p>
         <div class="card-footer"><span class="small-text muted">${html(exp.eb?.name || "—")} <span class="mono">${html(exp.eb?.host || "")}</span></span>
         <div class="actions"><a class="button small" href="/experiments/${encodeURIComponent(exp.id)}/history">Show Run History</a>${exp.error ? "" : `<a class="button small" href="/?new=1&amp;copy=${encodeURIComponent(exp.id)}">Copy</a>`}<button class="button small" data-delete="${html(exp.id)}">Delete</button>${exp.error ? "" : `<a class="button text" href="/experiments/${encodeURIComponent(exp.id)}/edit">Edit config</a><a class="button" href="/experiments/${encodeURIComponent(exp.id)}">Open control <span>↗</span></a>`}</div></div>
       </article>`).join("") || `<div class="panel panel-body"><p class="muted">No experiments yet. Create your first experiment to get started.</p></div>`}</div>
     <div class="index-note"><span>ⓘ</span><span>Each experiment keeps its own configuration and database. Opening a control page does not change DAQ settings.</span></div>${footer()}`;
+  app.querySelectorAll('[data-background-monitoring]').forEach(toggle=>toggle.onchange=async()=>{
+    const experiment=experiments.find(item=>item.id===toggle.dataset.backgroundMonitoring);
+    const enabled=toggle.checked;toggle.disabled=true;
+    try {
+      const result=await api(`/api/experiments/${encodeURIComponent(experiment.id)}/background-monitoring`,
+        {method:"PATCH",body:{enabled,revision:experiment.revision}});
+      experiment.background_monitoring=result.background_monitoring;experiment.revision=result.revision;
+      toggle.parentElement.querySelector('[data-monitoring-state]').textContent=enabled ? 'ON' : 'OFF';
+    } catch(error){toggle.checked=!!experiment.background_monitoring;toast(error.message,true);}
+    finally{toggle.disabled=false;}
+  });
   app.querySelectorAll('[data-delete]').forEach(button=>button.onclick=async()=>{
     try {
       const eid=button.dataset.delete;
@@ -187,7 +198,7 @@ function newExperimentPage(copyConfig=null) {
   $("#new-form").onsubmit = async event => {
     event.preventDefault(); const button = $("button[type=submit]", event.target); button.disabled = true;
     try {
-      const config = {...(copyConfig ? structuredClone(copyConfig) : {}),experiment:{name:$("#new-name").value.trim(),description:$("#new-description").value},
+      const config = {...(copyConfig ? structuredClone(copyConfig) : {}),background_monitoring:false,experiment:{name:$("#new-name").value.trim(),description:$("#new-description").value},
         eb:{name:$("#new-eb").value.trim(),host:$("#new-host").value.trim()},
         run_control_api:{...(copyConfig?.run_control_api || {}),name:copyConfig?.run_control_api.name || $("#new-eb").value.trim(),api:$("#new-api").value.trim(),enable_nssta:$("#new-nssta").checked}};
       const id = $("#new-id").value.trim();

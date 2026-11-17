@@ -458,6 +458,11 @@ class ControlService:
             if action=='stop' and isinstance(exc,asyncio.TimeoutError):
                 failure_message='Stop could not be confirmed before the operation timeout.'
             op['message']=failure_message
+            if action in ('start','nssta') and command_attempted and not op.get('daq_completed'):
+                # Notification consumers must see the DAQ failure even while an
+                # optional After API is still posting the failed Run to ELOG.
+                op['daq_failure_status']=outcome
+                op['daq_failure_message']=failure_message
             if action in ('start','nssta','stop'):
                 self.store.retain_control_error(eid,op,op['message'])
             if run:
@@ -465,6 +470,7 @@ class ControlService:
                     run["status"] = "failed"
                 run["error"] = op["message"]
                 self.store.put_run(eid, run)
+            self.persist(eid,op)
             try:
                 if command_attempted and not after_started and action in ('start','nssta','stop'):
                     hooks=hook_config.stop_api if action=='stop' else hook_config.start_api

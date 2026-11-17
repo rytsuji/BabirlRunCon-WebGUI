@@ -16,15 +16,15 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import Field, field_validator, model_validator
 
 from controllers import HttpController
-from monitor_api import read_monitor
 from manual_api import execute_manual
 from models import Babimo, Experiment, ExperimentConfig, RunControlEndpoint, ServerConfig, Strict
 from run_timer import RunTimers
 from monitor import Monitor
+from background import BackgroundMonitor
 from service import ControlService
 from storage import Store, now
 
-BUILD_ID = "v1-20261115-history-order-38"
+BUILD_ID = "v1-20261116-background-monitoring-39"
 BASE = Path(__file__).resolve().parent
 
 
@@ -157,6 +157,11 @@ class ProcessAction(Strict):
     allow_running: bool = False
 
 
+class BackgroundSetting(Strict):
+    enabled: bool
+    revision: str
+
+
 def create_app(settings=None, experiments_dir=None, controller=None, http_client=None, monitor_http_client=None):
     settings = settings or ServerConfig()
     store = Store(experiments_dir or BASE / settings.experiments_dir)
@@ -166,24 +171,30 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
     service = ControlService(store, adapter, client, settings)
     monitor = Monitor(adapter)
     service.monitor = monitor
+    background=BackgroundMonitor(monitor,service,store,monitor_client)
     run_timers = RunTimers(service, monitor)
     manual_tasks=set()
 
     @asynccontextmanager
     async def lifespan(app):
         store.recover_operations()
-        yield
-        for task in list(manual_tasks):task.cancel()
-        await asyncio.gather(*manual_tasks,return_exceptions=True)
-        await run_timers.close()
-        await service.close()
-        if http_client is None:
-            await client.aclose()
-        if monitor_http_client is None:
-            await monitor_client.aclose()
+        background.start()
+        try:
+            yield
+        finally:
+            await background.close()
+            for task in list(manual_tasks):task.cancel()
+            await asyncio.gather(*manual_tasks,return_exceptions=True)
+            await run_timers.close()
+            await service.close()
+            if http_client is None:
+                await client.aclose()
+            if monitor_http_client is None:
+                await monitor_client.aclose()
 
     app = FastAPI(title="DAQ Run Control", lifespan=lifespan)
     app.state.store = store
+    app.state.background = background
     app.state.service = service
     app.state.run_timers = run_timers
 
@@ -239,12 +250,29 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
         result = []
         for eid in store.ids():
             try:
-                config, _, _ = store.read_config(eid)
+                config, _, revision = store.read_config(eid)
                 result.append({**config.experiment.model_dump(), "eb": config.eb.model_dump(),
+                               'background_monitoring':config.background_monitoring,'revision':revision,
                                "active_operation": service.active.get(service.key(config))})
             except (ValueError, yaml.YAMLError) as exc:
                 result.append({"id": eid, "name": eid, "error": str(exc)})
         return result
+
+    @app.patch('/api/experiments/{eid}/background-monitoring')
+    async def background_setting(eid:str,body:BackgroundSetting):
+        _,raw,_=config_for(eid)
+        data=yaml.safe_load(raw)
+        data['background_monitoring']=body.enabled
+        try:
+            _,_,revision=store.save_config(eid,yaml.safe_dump(data,allow_unicode=True,sort_keys=False),
+                                          body.revision,comment='Background monitoring '+('ON' if body.enabled else 'OFF'))
+        except (ValueError,yaml.YAMLError) as exc:raise HTTPException(409,str(exc))
+        return {'background_monitoring':body.enabled,'revision':revision}
+
+    @app.get('/api/experiments/{eid}/notification-snapshot')
+    async def notification_snapshot(eid:str):
+        config,_,_=config_for(eid)
+        return background.snapshot(eid,config)
 
     @app.post("/api/experiments", status_code=201)
     async def create(config: NewExperimentConfig):
@@ -387,7 +415,7 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
             observed.pop('next_events',None)
             observed['es_connections']=monitor.es_connections.get(eid)
         else:
-            observed = await monitor.read(eid, config, refresh)
+            observed = await background.read(eid, config, refresh)
         return {**observed,
                 'config_revision':config_revision,
                 "run_timer": run_timers.public(eid),
@@ -414,21 +442,25 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
         config,_,_ = config_for(eid)
         if owner_of_eb(eid,config):
             raise HTTPException(409,"This EB is controlled by another experiment.")
-        op = service.reserve(config,eid,"connections")
-        try:
-            explicit=request.url.path.endswith('/connect')
-            if explicit:await service.check_state(eid,config,{'stopped'})
-            result = await service.connections(eid,config,explicit)
-            op["steps"] = [{"name":"ES connection readback","status":"succeeded","response":result}]
-            op.update(status="succeeded",message="Connections checked")
-            return result
-        except Exception as exc:
-            op.update(status="failed",message=str(exc))
-            raise HTTPException(409 if explicit else 502,str(exc))
-        finally:
-            op["finished_at"] = now()
-            service.persist(eid,op)
-            service.active.pop(service.key(config),None)
+        explicit=request.url.path.endswith('/connect')
+        async def read_connections():
+            op = service.reserve(config,eid,"connections")
+            try:
+                if explicit:await service.check_state(eid,config,{'stopped'})
+                result = await service.connections(eid,config,explicit)
+                op["steps"] = [{"name":"ES connection readback","status":"succeeded","response":result}]
+                op.update(status="succeeded",message="Connections checked")
+                return result
+            except Exception as exc:
+                op.update(status="failed",message=str(exc))
+                raise HTTPException(409 if explicit else 502,str(exc))
+            finally:
+                op["finished_at"] = now()
+                service.persist(eid,op)
+                service.active.pop(service.key(config),None)
+
+        if explicit:return await read_connections()
+        return await background.connection_read(config,read_connections)
 
     @app.get('/api/experiments/{eid}/webutil/{kind}')
     async def webutil_read(eid:str,kind:Literal['config','es','raw'],efn:Optional[int]=None,refresh:bool=False):
@@ -596,8 +628,7 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
         if not 0<=index<len(config.monitor_api):raise HTTPException(404,'Monitor not found')
         endpoint=config.monitor_api[index]
         if not endpoint.enabled:raise HTTPException(409,'Monitor is disabled')
-        try:result=await read_monitor(monitor_client,endpoint,request,
-                                     state=monitor.arguments(eid,config),store=store,eid=eid)
+        try:result=await background.monitor_read(eid,config,index,request)
         except asyncio.CancelledError:
             return JSONResponse({'status':'fail','message':'Monitor request cancelled'},status_code=499)
         if config_for(eid)[2]!=revision:raise HTTPException(409,'Monitor configuration changed')

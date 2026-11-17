@@ -217,6 +217,17 @@ class Store:
             rows = db.execute("SELECT data FROM operations ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
         return [json.loads(row[0]) for row in rows]
 
+    def latest_start_operation(self,eid):
+        with self.connect(eid) as db:
+            row=db.execute("SELECT data FROM operations WHERE action IN ('start','nssta') ORDER BY created_at DESC LIMIT 1").fetchone()
+        if row is None:return None
+        op=json.loads(row[0])
+        result={key:op.get(key) for key in ('id','action','created_at','status','message','daq_completed','wait_timed_out')}
+        result['steps']=[{key:step.get(key) for key in ('name','status')} for step in op.get('steps',[])]
+        if not op.get('daq_completed') and op.get('daq_failure_status'):
+            result.update(status=op['daq_failure_status'],message=op.get('daq_failure_message',op.get('message')))
+        return result
+
     def history_version(self, eid):
         with self.connect(eid) as db:
             op = db.execute("SELECT id,status FROM operations ORDER BY created_at DESC LIMIT 1").fetchone()

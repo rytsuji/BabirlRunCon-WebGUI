@@ -158,6 +158,7 @@ class Link(Strict):
 
 
 class ExperimentConfig(Strict):
+    background_monitoring: bool = False
     experiment: Experiment
     eb: EB
     run_control_api: RunControlEndpoint
@@ -200,6 +201,8 @@ class History(Strict):
 
 
 class LiveState(Strict):
+    state_observed_at: Optional[str] = None
+    events_observed_at: Optional[str] = None
     state: Literal["stopped", "running", "nssta", "unknown"]
     runname: str
     runnumber: int = Field(ge=0)

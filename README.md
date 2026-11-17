@@ -34,11 +34,37 @@ Run Control API base URL, for example `http://<API-server-IP>:5000`.
 These settings and additional Start/Stop/Restart/Monitor APIs can also be registered
 and edited through **Edit configuration**.
 
-Monitor APIs use GET and update their latest result only while the Run Control
-tab is visible. Configure their interval, timeout and timing in Edit configuration.
-They also refresh after Start, NSSTA and Stop transitions. If a request is already
-pending, one refresh is queued. DAQ arguments wait for the first Run overview data
-and then use its shared snapshot.
+Use the **Background monitoring** toggle on each experiment card to keep DAQ
+state and counters updated without a browser. It defaults to OFF, is saved in
+experiment.yaml, and stays enabled after restarting the GUI. Copies start OFF.
+OFF stops background collection; opening the control page and Refresh still work.
+Run one GUI process per experiments directory.
+
+Update and restart babirl-runcon-api before enabling background monitoring.
+These Python-only API changes do not require rebuilding the native library.
+
+Background state reads run about every 2 seconds. EB/ES counters use Event polling
+interval (default 2 seconds). IDLE ES connection checks remain about every 2 seconds
+and do not reconnect ES. Configuration and EF lists are read initially, on Refresh,
+on a new collection, and after settings/operation updates. Slow or failed reads can
+delay these intervals; requests do not accumulate. Raw Data remains display-only.
+
+Monitor APIs use GET. With background monitoring OFF, they update only while the
+Run Control tab is visible. With it ON, enabled Monitor APIs also run without a
+browser, respecting their configured interval, timeout and Running/IDLE timing.
+Results and in-progress reads are shared across browsers. They refresh on state
+transitions. DAQ arguments use the shared Run overview data.
+
+For an external notification service, use
+http://<GUI-server-IP>:<port>/api/experiments/<ID>/notification-snapshot .
+This returns retained data only and never triggers a DAQ request. observed_at is
+the last successful Run-state read, not the response time or counter-read time.
+timestamps includes the last configuration, EB-counter and ES-counter successes.
+Read failures retain previous values and success times, with error details.
+monitoring_enabled reports the toggle; it does not stop an external LINE service.
+Only necessary Run fields and the latest Start/NSSTA operation summary are exposed.
+Run start times come from babild with one-second resolution; same-name restarts
+within the same second cannot be distinguished by runname + start_time.
 Use Send DAQ arguments to pass shared Run overview values, getconfig or Run history as
 query parameters to a Monitor API. JSON objects are encoded as JSON strings.
 Choose **Before Start** or **After Start** for each Start API, and **Before Stop**
