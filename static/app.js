@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261116-background-monitoring-39";
+const GUI_BUILD = "v1-20261117-monitor-polling-41";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -501,7 +501,7 @@ async function controlPage(eid, config, version, revision) {
       ${step.response ? `<details data-step="${index}" ${open.has(String(index)) ? "open" : ""}><summary>Response / output</summary><pre>${pretty(step.response)}</pre></details>` : ""}</li>`).join("") || `<li class="small-text muted">Waiting to execute…</li>`}</ul>`;
   }
 
-  let polling = false, lastHistory = "", lastVerifiedAt = null;
+  let polling = false, lastHistory = "", lastVerifiedAt = null, connectionRefresh = null, connectionRefreshError = null;
   async function poll() {
     if (polling || version !== routeVersion) return;
     clearTimeout(timer); polling = true;
@@ -534,15 +534,20 @@ async function controlPage(eid, config, version, revision) {
         }
         lastRestartFinished=restarted.id;
       }
-      if (connectionsRequested && !status.active_operation) {
+      if (connectionsRequested && !status.active_operation && !connectionRefresh) {
         connectionsRequested = false;
         const justChecked=status.es_connections?.checked_at && Date.now()-Date.parse(status.es_connections.checked_at)<1000;
         if (status.connected && (forceConnections || !justChecked)) {
-          try { status.es_connections = await api(base+"/connections/refresh",{method:"POST"}); }
-          catch (error) { status.es_connections = {supported:true,items:[],error:error.message}; }
+          // A slow/unreachable ES must not hold back DAQ errors, counters or
+          // the first Monitor request while its connection check completes.
+          connectionRefresh = api(base+"/connections/refresh",{method:"POST"})
+            .then(()=>{connectionRefreshError=null;})
+            .catch(error=>{connectionRefreshError={supported:true,items:[],error:error.message};})
+            .finally(()=>{connectionRefresh=null;if(version===routeVersion)poll();});
         }
         forceConnections=false;
       }
+      if(connectionRefreshError)status.es_connections=connectionRefreshError;
       if (version !== routeVersion) return;
       if(status.config_revision && status.config_revision!==monitorRevision){
         monitors.stop();

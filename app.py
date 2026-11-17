@@ -24,7 +24,7 @@ from background import BackgroundMonitor
 from service import ControlService
 from storage import Store, now
 
-BUILD_ID = "v1-20261116-background-monitoring-39"
+BUILD_ID = "v1-20261117-monitor-polling-41"
 BASE = Path(__file__).resolve().parent
 
 

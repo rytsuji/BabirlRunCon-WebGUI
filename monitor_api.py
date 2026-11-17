@@ -39,9 +39,12 @@ async def read_monitor(client,endpoint,request=None,state=None,store=None,eid=No
             return {'status':status,'data':payload.get('data'),
                     'message':str(payload.get('message') or payload.get('comment') or
                                   (f'HTTP {response.status_code}' if not response.is_success else ''))}
+    stopped=asyncio.Event()
     async def disconnected():
         if request is None:await asyncio.Future()
-        while not await request.is_disconnected():await asyncio.sleep(.1)
+        while not stopped.is_set():
+            if await request.is_disconnected():return
+            if not stopped.is_set():await asyncio.sleep(.1)
     task=asyncio.create_task(asyncio.wait_for(fetch(),endpoint.timeout_sec))
     watcher=asyncio.create_task(disconnected())
     try:
@@ -57,6 +60,9 @@ async def read_monitor(client,endpoint,request=None,state=None,store=None,eid=No
             result={'status':'fail','data':None,'message':str(exc) or type(exc).__name__}
         return {**result,'checked_at':now()}
     finally:
+        # Request.is_disconnected() uses a cancellation scope which can consume
+        # cancel(). The explicit flag also lets that watcher finish normally.
+        stopped.set()
         for pending in (task,watcher):
             if not pending.done():pending.cancel()
         await asyncio.gather(task,watcher,return_exceptions=True)

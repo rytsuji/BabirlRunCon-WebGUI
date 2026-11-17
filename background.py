@@ -235,9 +235,12 @@ class BackgroundMonitor:
         task=slot['task']
         if task is None:return slot['result']
         slot['waiters']+=1
+        stopped=asyncio.Event()
         async def disconnected():
             if request is None:await asyncio.Future()
-            while not await request.is_disconnected():await asyncio.sleep(.1)
+            while not stopped.is_set():
+                if await request.is_disconnected():return
+                if not stopped.is_set():await asyncio.sleep(.1)
         watcher=asyncio.create_task(disconnected())
         waiter=asyncio.ensure_future(asyncio.shield(task))
         try:
@@ -246,6 +249,7 @@ class BackgroundMonitor:
             return copy.deepcopy(await waiter)
         finally:
             slot['waiters']-=1
+            stopped.set()
             watcher.cancel()
             if not waiter.done():waiter.cancel()
             await asyncio.gather(watcher,waiter,return_exceptions=True)

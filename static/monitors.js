@@ -73,10 +73,36 @@ class MonitorPoller {
   }
 }
 
+// Keep brief transport failures from flashing over an existing result.
+// Persistent failures are still shown, and DAQ error results are immediate.
+class MonitorResultDisplay {
+  constructor(publish,{setTimer=(fn,delay)=>setTimeout(fn,delay),clearTimer=id=>clearTimeout(id)}={}) {
+    Object.assign(this,{publish,setTimer,clearTimer});this.slots=new Map();
+  }
+  accept(index,result) {
+    let slot=this.slots.get(index);
+    if(!slot){slot={shown:false,timer:null,pending:null};this.slots.set(index,slot);}
+    if(slot.shown && ['fail','timeout'].includes(result.status)){
+      slot.pending=result;
+      if(slot.timer===null)slot.timer=this.setTimer(()=>{
+        slot.timer=null;const pending=slot.pending;slot.pending=null;
+        this.publish(index,pending);
+      },1000);
+      return;
+    }
+    this.clearTimer(slot.timer);slot.timer=null;slot.pending=null;slot.shown=true;
+    this.publish(index,result);
+  }
+  reset() {
+    this.slots.forEach(slot=>this.clearTimer(slot.timer));this.slots.clear();
+  }
+}
+
 function mountMonitors({workspace,base,items,revision,isLive}) {
   const panel=document.createElement('section');panel.className='panel monitor-panel';
   workspace.appendChild(panel);
   let definitions=items || [];
+  const display=new MonitorResultDisplay((index,result)=>renderResult(index,result));
   const poller=new MonitorPoller({
     request:async(index,revision,signal)=>{
       const response=await fetch(`${base}/monitors/${index}?revision=${encodeURIComponent(revision)}`,{signal});
@@ -84,7 +110,9 @@ function mountMonitors({workspace,base,items,revision,isLive}) {
       if(!response.ok){const error=new Error(value.detail || `HTTP ${response.status}`);error.stale=response.status===409;throw error;}
       return value;
     },
-    onResult:(index,result)=>{
+    onResult:(index,result)=>display.accept(index,result)
+  });
+  function renderResult(index,result) {
       if(!isLive())return;
       const card=panel.querySelector(`[data-monitor="${index}"]`);if(!card)return;
       card.className='monitor-card '+(result.status==='error' ? 'monitor-error' : ['fail','timeout'].includes(result.status) ? 'monitor-warning' : '');
@@ -92,17 +120,16 @@ function mountMonitors({workspace,base,items,revision,isLive}) {
       card.querySelector('.monitor-value').innerHTML=formatDAQ(result.data);
       card.querySelector('.monitor-message').textContent=result.message || '';
       card.querySelector('.monitor-time').textContent=result.checked_at ? new Date(result.checked_at).toLocaleTimeString() : '';
-    }
-  });
+  }
   function configure(items,revision) {
-    poller.stop();definitions=items || [];
+    poller.stop();display.reset();definitions=items || [];
     const enabled=definitions.some(item=>item.enabled!==false);
     panel.hidden=!enabled;workspace.classList.toggle('with-monitors',enabled);
     panel.innerHTML='<div class="panel-head"><h2>Monitor API</h2><span class="small-text muted">Display only</span></div><div class="panel-body">'+definitions.map((item,index)=>item.enabled===false ? '' : `<article class="monitor-card" data-monitor="${index}"><div class="monitor-card-head"><strong>${escapeRunHTML(item.name)}</strong><span class="monitor-status">WAITING</span></div><div class="monitor-value muted">No result yet</div><div class="monitor-message"></div><div class="monitor-meta"><span>${escapeRunHTML({always:'Every time',running:'During running',idle:'During IDLE'}[item.timing] || 'Every time')} · ${item.interval_sec ?? 5}s</span><time class="monitor-time"></time></div></article>`).join('')+'</div>';
     poller.configure(definitions,revision);
   }
   configure(definitions,revision);
-  return {configure,context:(visible,state,ready,transition)=>poller.context(visible,state,ready,transition),stop:()=>poller.stop(),destroy:()=>{poller.stop();panel.remove();}};
+  return {configure,context:(visible,state,ready,transition)=>{if(!visible)display.reset();poller.context(visible,state,ready,transition);},stop:()=>{poller.stop();display.reset();},destroy:()=>{poller.stop();display.reset();panel.remove();}};
 }
 
-if(typeof module!=='undefined')module.exports={MonitorPoller};
+if(typeof module!=='undefined')module.exports={MonitorPoller,MonitorResultDisplay};
