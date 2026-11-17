@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261117-monitor-polling-41";
+const GUI_BUILD = "v1-20261117-daq-state-priority-42";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -519,10 +519,11 @@ async function controlPage(eid, config, version, revision) {
         } catch (error) { historyError = error.message; }
       }
       if (version !== routeVersion) return;
-      const readErrors=Object.values(status.state?.acquisition_errors || {});
-      const errorSignature=JSON.stringify([status.control_errors || [],readErrors]);
+      const acquisitionErrors=status.state?.acquisition_errors || {};
+      const readErrors=Object.entries(acquisitionErrors).filter(([key])=>status.state?.state!=='stopped' || !['/api/v1/run/events/es','connections'].includes(key)).map(([,value])=>value);
+      const errorSignature=JSON.stringify([status.control_errors || [],acquisitionErrors]);
       if(errorSignature!==lastErrorSignature){
-        if((status.control_errors || []).length || readErrors.length){connectionsRequested=true;forceConnections=true;}
+        if((status.control_errors || []).length || Object.keys(acquisitionErrors).length){connectionsRequested=true;forceConnections=true;}
         lastErrorSignature=errorSignature;
       }
       const restarted=hist.operations.find(op=>op.action==='restart' && op.finished_at);
@@ -574,7 +575,7 @@ async function controlPage(eid, config, version, revision) {
       const retainedErrors=status.control_errors || [];
       $("#control-errors").hidden=!retainedErrors.length;
       $("#control-errors").innerHTML=retainedErrors.map(error=>`<div><strong>${html(error.action.toUpperCase())} failed</strong>${error.messages.map(message=>`<div style="white-space:pre-wrap;overflow-wrap:anywhere">${html(message)}</div>`).join('')}</div>`).join('');
-      const liveErrors=[...readErrors,...(status.es_connections?.items || []).filter(item=>item.error).map(item=>item.error)];
+      const liveErrors=[...readErrors,...(status.state.state==='stopped' ? [] : status.es_connections?.items || []).filter(item=>item.error).map(item=>item.error)];
       if(liveErrors.length){
         $("#control-errors").hidden=false;
         $("#control-errors").innerHTML+=`<div><strong>ES / DAQ read errors</strong>${[...new Set(liveErrors)].map(message=>`<div style="white-space:pre-wrap;overflow-wrap:anywhere">${html(message)}</div>`).join('')}</div>`;
@@ -611,9 +612,8 @@ async function controlPage(eid, config, version, revision) {
       renderLiveConfig();
       $("#es-counters").innerHTML = formatESCounters(state.es_event_num,state.ef_info);
       $("#last-checked").textContent = `Counters ${formatTime(status.events_at)} · ${config.run_control_api.event_poll_interval_sec ?? 2}s`;
-      const errors = state.acquisition_errors || {};
-      $("#acquisition-warning").hidden = !Object.keys(errors).length;
-      $("#acquisition-warning").textContent = "Some details could not be read: " + Object.values(errors).join("; ");
+      $("#acquisition-warning").hidden = !readErrors.length;
+      $("#acquisition-warning").textContent = "Some details could not be read: " + readErrors.join("; ");
       if (!draftDirty && status.connected) {
         $("#run-name").value = state.runname; $("#run-number").value = state.runnumber;
       }

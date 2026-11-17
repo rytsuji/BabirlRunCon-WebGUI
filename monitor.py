@@ -82,7 +82,7 @@ class Monitor:
                     self.cache[eid] = entry
             if time.monotonic() >= entry["next_events"]:
                 eb_sampled=False
-                if not entry['connected'] and entry['events_at'] is not None:
+                if not safe_events and not entry['connected'] and entry['events_at'] is not None:
                     await self.snapshot(eid,config,entry)
                 try:
                     if hasattr(self.adapter, "events"):
@@ -118,7 +118,7 @@ class Monitor:
                     entry["connected"] = connected and entry["connected"]
                     entry["error"] = None if entry["connected"] else "EB event read failed; waiting for recovery."
                     entry["eb_connection"] = {"connected":entry["connected"],"error":entry["error"]}
-                    if not connected:
+                    if not connected and not safe_events:
                         # A slow ES request may hold the API's counter lock.
                         # getconfig uses an independent EB-only read path.
                         await self.snapshot(eid,config,entry)

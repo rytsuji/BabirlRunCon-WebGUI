@@ -240,13 +240,10 @@ class ControlService:
                 deadline=asyncio.get_running_loop().time()+self.settings.operation_timeout_sec
                 while asyncio.get_running_loop().time()<deadline:
                     try:
-                        state=await self.controller.status(eid,config)
+                        reader=getattr(self.controller,'snapshot',self.controller.status) if op['action']=='stop' else self.controller.status
+                        state=await reader(eid,config)
                         if self.monitor:self.monitor.publish(eid,config,state)
-                        if state['state'] in allowed and not state.get('acquisition_errors'):
-                            if op['action']=='stop':
-                                connections=await self.connections(eid,config,False)
-                                if connections.get('error') or any(item.get('error') for item in connections.get('items',[])):
-                                    await asyncio.sleep(1);continue
+                        if state['state'] in allowed and (op['action']=='stop' or not state.get('acquisition_errors')):
                             break
                     except Exception:pass
                     await asyncio.sleep(1)
@@ -333,22 +330,29 @@ class ControlService:
                         op['stop_error']=str(exc)
                         self.persist(eid,op)
                         raise
-                    state=await self.step(eid,op,'Verify DAQ stopped',lambda:self.wait_state(eid,config,{'stopped'}))
-                    async def verify_es():
-                        errors=list(state.get('acquisition_errors',{}).values())
-                        connections=await self.connections(eid,config,False)
-                        errors.extend(item['error'] for item in connections.get('items',[]) if item.get('error'))
-                        if connections.get('error'):errors.append(connections['error'])
-                        if errors:raise RuntimeError('\n'.join(errors))
-                    try:
-                        await self.step(eid,op,'Verify ES after Stop',verify_es)
-                    except Exception as exc:
-                        op['stop_error']=str(exc)
-                        self.persist(eid,op)
-                        raise
-                    return state
+                    return await self.step(eid,op,'Verify DAQ stopped',lambda:self.wait_state(eid,config,{'stopped'},include_events=False))
 
                 state=await self.timed_operation(eid,config,op,send_and_confirm,{'stopped'})
+                # Stop completion follows babild. Failed ES counter reads are
+                # diagnostic data, not another stop condition.
+                previous=self.monitor.arguments(eid,config) if self.monitor else {}
+                for key in ('event_num','es_event_num'):
+                    if state.get(key) is None or key=='es_event_num' and not state.get(key):state[key]=previous.get(key,{} if key=='es_event_num' else None)
+                reader=getattr(self.controller,'monitor_events',None) or getattr(self.controller,'events',None)
+                if reader:
+                    try:
+                        counters=await asyncio.wait_for(reader(eid,config),5)
+                        if not counters.get('skipped'):
+                            errors=counters.get('acquisition_errors',{})
+                            state.setdefault('acquisition_errors',{}).update(errors)
+                            for key in ('event_num','es_event_num'):
+                                if key=='es_event_num' and '/api/v1/run/events/es' in errors:
+                                    state.setdefault(key,{}).update(counters.get(key) or {})
+                                elif counters.get(key) is not None:state[key]=counters[key]
+                            state['events_observed_at']=now()
+                    except Exception as exc:
+                        state.setdefault('acquisition_errors',{})['/api/v1/run/events/es']=str(exc) or type(exc).__name__
+                if self.monitor:self.monitor.publish(eid,config,state)
                 op['stop_confirmed']=True
                 self.persist(eid,op)
                 if run is None:

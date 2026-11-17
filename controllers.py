@@ -73,7 +73,7 @@ class HttpController:
     def decode_config(raw):
         run = raw["runinfo"]
         # Missing/invalid mandatory fields must never become a default IDLE.
-        state = {"state": {"IDLE": "stopped", "START": "running", "NSSTA": "nssta"}.get(run["runstatus"], "unknown"),
+        state = {"state": {"IDLE": "stopped", "START": "running", "NSSTA": "nssta", "WAITSTOP": "running", "DRY": "running"}.get(run["runstatus"], "unknown"),
                  "runname": run["runname"], "runnumber": run["runnumber"], "header": run.get("header", ""), "ender": run.get("ender", ""),
                  "start_time": daq_time(run,'start'), "stop_time": daq_time(run,'stop'),
                  "hdlist": raw.get("hdlist", []), "ef_info": raw.get("eflist", []),
@@ -97,7 +97,7 @@ class HttpController:
 
     async def run_state(self, eid, config):
         raw=await self.request(config,'GET','/api/v1/run/state')
-        return {'state':{'IDLE':'stopped','START':'running','NSSTA':'nssta'}.get(raw['runstatus'],'unknown'),
+        return {'state':{'IDLE':'stopped','START':'running','NSSTA':'nssta','WAITSTOP':'running','DRY':'running'}.get(raw['runstatus'],'unknown'),
                 'runnumber':raw['runnumber'],'start_time':daq_time(raw,'start'),
                 'stop_time':daq_time(raw,'stop'),'header':raw.get('header',''),
                 'state_observed_at':now()}
@@ -124,7 +124,7 @@ class HttpController:
 
     async def monitor_connections(self,eid,config,reconnect=False,idle_only=True):
         if reconnect:raise RuntimeError('Monitoring never reconnects ES')
-        result=await self.request(config,'GET','/api/v1/run/monitor-connections')
+        result=await self.request(config,'GET','/api/v1/run/monitor-connections'+('' if idle_only else '?idle_only=false'))
         return {**result,'supported':True,'checked_at':now()}
 
     async def status(self, eid, config):

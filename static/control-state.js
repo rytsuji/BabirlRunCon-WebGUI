@@ -23,10 +23,11 @@ function daqControlState({status, pending, draftDirty, header, runname, runnumbe
   const startReason = idleReason || (status?.control_errors?.length ? "Resolve the retained DAQ errors with Stop or Restart DAQ before starting." : "") || (draftDirty ? "Set Run Name / Number before starting." : "") || headerReason;
   const setReason = idleReason || nameReason || numberReason;
   const stopBusy=pending || (!!status?.active_operation && !["start","nssta"].includes(status.active_operation.action));
+  const daqReadErrors=Object.keys(status?.state?.acquisition_errors || {}).filter(key=>!['/api/v1/run/events/es','connections'].includes(key));
   const stopReason = stopBusy ? "Another operation is in progress."
     : status?.eb_owner ? "This EB is controlled by another experiment."
     : status?.state?.target?.allow_writes===false ? "The Run Control API has writes disabled."
-    : status?.connected && live==="stopped" && !unresolved && !status?.active_operation && !status?.control_errors?.length && !Object.keys(status?.state?.acquisition_errors || {}).length ? "DAQ is idle. There is no active acquisition to stop." : "";
+    : status?.connected && live==="stopped" && !unresolved && !status?.active_operation && !status?.control_errors?.length && !daqReadErrors.length ? "DAQ is idle. There is no active acquisition to stop." : "";
   const restartReason = !restartConfigured ? "No Restart API configured. Add one in Edit configuration."
     : busy && !(status?.restart_unlocked && status?.active_operation?.action==='stop' && !pending) ? "Another operation is in progress."
     : status?.eb_owner ? "This EB is controlled by another experiment."

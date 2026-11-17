@@ -24,7 +24,7 @@ from background import BackgroundMonitor
 from service import ControlService
 from storage import Store, now
 
-BUILD_ID = "v1-20261117-monitor-polling-41"
+BUILD_ID = "v1-20261117-daq-state-priority-42"
 BASE = Path(__file__).resolve().parent
 
 
@@ -410,12 +410,20 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
     async def status(eid: str, refresh: bool = False):
         config, _, config_revision = config_for(eid)
         active=service.active.get(service.key(config))
-        if active and (active.get('wait_started_at') or active['action']=='restart'):
-            observed=copy.deepcopy(monitor.cache.get(eid,{'state':{'state':'unknown'},'connected':False}))
-            observed.pop('next_events',None)
-            observed['es_connections']=monitor.es_connections.get(eid)
-        else:
-            observed = await background.read(eid, config, refresh)
+        observed = await background.read(eid, config, refresh)
+        state=observed['state']
+        if not service.active.get(service.key(config)) and observed.get('connected') and state.get('state')=='stopped':
+            run=store.active_run(eid)
+            # An external babicon Stop closes only the same confirmed collection;
+            # never close a failed/unidentified Start or invoke GUI Stop hooks.
+            if run and run['status']=='running' and state.get('start_time') and run.get('started_at')==state['start_time'] and state.get('stop_time') and state.get('raw_config',{}).get('runinfo',{}).get('runstatus')=='IDLE':
+                if run_timers.public(eid) and run_timers.public(eid).get('active'):
+                    await run_timers.cancel(eid,'DAQ was stopped outside the GUI. Timer cancelled.')
+                run.update(status='completed',finished_at=state['stop_time'],daq_config=state['raw_config'],
+                           event_num=state.get('event_num'),es_event_num=state.get('es_event_num',{}))
+                store.put_run(eid,run)
+                store.remember(eid,state)
+                store.clear_control_errors(eid)
         return {**observed,
                 'config_revision':config_revision,
                 "run_timer": run_timers.public(eid),
@@ -443,6 +451,15 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
         if owner_of_eb(eid,config):
             raise HTTPException(409,"This EB is controlled by another experiment.")
         explicit=request.url.path.endswith('/connect')
+        if not explicit:
+            # A read-only ES check must never reserve the DAQ operation lock.
+            async def read_only():
+                reader=getattr(adapter,'monitor_connections',None)
+                if reader is None:return await service.connections(eid,config,False)
+                result=await reader(eid,config,False,idle_only=False)
+                monitor.es_connections[eid]=result
+                return result
+            return await background.connection_read(config,read_only)
         async def read_connections():
             op = service.reserve(config,eid,"connections")
             try:

@@ -38,6 +38,14 @@ Use the **Background monitoring** toggle on each experiment card to keep DAQ
 state and counters updated without a browser. It defaults to OFF, is saved in
 experiment.yaml, and stays enabled after restarting the GUI. Copies start OFF.
 OFF stops background collection; opening the control page and Refresh still work.
+While a control page is open, babild Run state is checked about every 2 seconds
+even with Background monitoring OFF. External babicon Start/Stop changes are
+reflected without reloading. A confirmed external Stop closes the matching Run
+record and cancels its timer without sending commands or executing GUI Stop APIs.
+DAQ state and ES health are separate: an ES read failure does not change babild's
+state. While IDLE, ES health is shown in Connections and clears on a successful
+check. A GUI Stop completes when babild is verified IDLE; ES diagnostics do not
+prevent completion. Controls stay locked until its history save and Stop APIs finish.
 Run one GUI process per experiments directory.
 
 Update and restart babirl-runcon-api before enabling background monitoring.

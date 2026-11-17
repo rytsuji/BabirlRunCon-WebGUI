@@ -157,21 +157,23 @@ class BackgroundMonitor:
         self.bind(eid,config)
         source=Monitor.source(config)
         active=self.service.active.get(self.service.key(config))
-        enabled=source in self.intervals or config.background_monitoring
         if active:
             # No native event/config calls can queue behind Start/Stop/Restart.
             # The small independent state read is safe during Start/Stop waits.
-            if enabled and active['action']!='restart':await self.light_state(eid,config,active=True)
+            if active['action']!='restart':await self.light_state(eid,config,active=True)
             result=copy.deepcopy(self.monitor.cache.get(eid,{'state':{'state':'unknown'},'connected':False}))
             result.pop('next_events',None)
             result['es_connections']=self.monitor.es_connections.get(eid)
-            return result
-        if enabled and not refresh and eid in self.monitor.cache:await self.light_state(eid,config)
+            return self.current_view(config,result)
+        if not refresh and eid in self.monitor.cache:await self.light_state(eid,config)
         interval=self.intervals.get(source,config.run_control_api.event_poll_interval_sec)
         effective=config.model_copy(deep=True)
         effective.run_control_api.event_poll_interval_sec=min(interval,config.run_control_api.event_poll_interval_sec)
-        result=await self.monitor.read(eid,effective,refresh,safe_events=enabled)
-        if enabled:
+        result=await self.monitor.read(eid,effective,refresh,safe_events=True)
+        return self.current_view(config,result)
+
+    def current_view(self,config,result):
+        if Monitor.source(config) in self.held:
             retained=self.entry(config)
             checked=result.get('es_connections')
             if checked and not checked.get('skipped') and retained['state']['state']=='stopped' and instant(checked.get('checked_at'))>=instant(retained['timestamps']['configuration_at']):
@@ -182,7 +184,8 @@ class BackgroundMonitor:
             result['connected']=retained['connected']
             result['error']=retained['error']
             result['state']['acquisition_errors']=copy.deepcopy(retained['state']['acquisition_errors'])
-            if not retained['connected']:result['state']['state']='unknown'
+            result['state']['state']=retained['state']['state'] if retained['connected'] else 'unknown'
+            result['eb_connection']={'connected':retained['connected'],'error':retained['error']}
         return result
 
     async def light_state(self,eid,config,active=False):
@@ -195,15 +198,16 @@ class BackgroundMonitor:
         try:
             partial=await reader(eid,config)
         except Exception as exc:
-            if epoch==self.monitor.epoch:self.state_failed(eid,config,str(exc))
+            if epoch==self.monitor.epoch:
+                self.state_failed(eid,config,str(exc) or type(exc).__name__)
+                if eid in self.monitor.cache:self.monitor.cache[eid].update(connected=False,error=str(exc))
             return
         if epoch!=self.monitor.epoch:return
         cached=self.monitor.cache.get(eid)
         prior=cached['state'] if cached else self.entry(config)['state']
-        changed=any(partial.get(key)!=prior.get(key) for key in ('start_time','runnumber'))
+        changed=any(partial.get(key)!=prior.get(key) for key in ('state','start_time','runnumber'))
         self.state_read(eid,config,partial,partial.get('state_observed_at') or now(),full=False)
-        if active:return
-        if cached and changed:
+        if cached and changed and not active:
             # New collection: read runname and low-frequency configuration once.
             await self.monitor.snapshot(eid,config,cached)
         elif cached:
