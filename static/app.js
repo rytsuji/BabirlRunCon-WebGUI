@@ -1,5 +1,5 @@
 "use strict";
-const GUI_BUILD = "v1-20261117-daq-state-priority-42";
+const GUI_BUILD = "v1-20261117-run-outcome-44";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -429,6 +429,7 @@ async function controlPage(eid, config, version, revision) {
     if ($("#recall").value === "" || !memory) return;
     $("#run-name").value = memory.name; $("#run-number").value = memory.current_number;
     $("#run-header").value = memory.prev_header; headerDirty = true;
+    runTimer.changeComment('header',$("#run-header").value);
     draftDirty = memory.name !== current?.state?.runname || memory.current_number !== current?.state?.runnumber;
     controls(); toast("Saved values loaded into the form. Nothing has been sent to DAQ.");
   };
@@ -617,7 +618,10 @@ async function controlPage(eid, config, version, revision) {
       if (!draftDirty && status.connected) {
         $("#run-name").value = state.runname; $("#run-number").value = state.runnumber;
       }
-      if (!headerDirty && status.connected && !runTimer.active()) $("#run-header").value = state.header || "";
+      if (!headerDirty && status.connected && !runTimer.active() && !runTimer.hasComment('header')) {
+        $("#run-header").value = state.header || "";
+        runTimer.changeComment('header',$("#run-header").value);
+      }
       const warning = $("#connection-warning");
       warning.hidden = true;
       if (!status.connected || status.eb_owner || state.target?.allow_writes === false) {

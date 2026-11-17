@@ -361,9 +361,7 @@ class ControlService:
                          'started_at':state['start_time'],'config_snapshot':config.model_dump(),
                          'externally_started':True}
                 mode=run['mode']
-                run.update(status="completed", finished_at=state["stop_time"],
-                           daq_config=state["raw_config"], event_num=state["event_num"], es_event_num=state["es_event_num"])
-                self.store.put_run(eid, run)
+                self.store.finish_run(eid,run,state)
                 self.store.remember(eid, state)
                 self.store.clear_control_errors(eid)
                 op['daq_completed']=True

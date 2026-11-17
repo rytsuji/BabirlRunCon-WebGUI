@@ -80,8 +80,10 @@ class BackgroundMonitor:
         self.next_state[Monitor.source(config)]=time.monotonic()+2
         if full and state.get('events_observed_at'):
             self.counters_read(eid,config,state,state['events_observed_at'])
+        self.record_run_errors(eid,config,state.get('acquisition_errors',{}))
 
     def state_failed(self,eid,config,error):
+        self.record_run_errors(eid,config,{'state':error})
         entry=self.entry(config)
         entry.update(connected=False,error=error)
         entry['state']['acquisition_errors']['state']=error
@@ -100,6 +102,18 @@ class BackgroundMonitor:
                 entry['state'][key]=copy.deepcopy(counters[key])
                 entry['state']['acquisition_errors'].pop(path,None)
                 entry['timestamps'][clock]=stamp
+        self.record_run_errors(eid,config,errors)
+
+    def record_run_errors(self,eid,config,errors):
+        state=self.entry(config)['state']
+        messages=[str(value) for key,value in errors.items() if key!='target' and value]
+        if state.get('state') not in ('running','nssta') or not messages:return
+        source=Monitor.source(config)
+        recorder=getattr(self.store,'record_acquisition_error',None)
+        if recorder:
+            targets={eid,*[other for other,key in self.sources.items() if key==source]} & set(self.store.ids())
+            for target in targets:
+                recorder(target,state,messages)
 
     def snapshot(self,eid,config):
         # No bind, read, probe, reconnect, or timestamp generation here.
@@ -271,6 +285,7 @@ class BackgroundMonitor:
             for eid in self.store.ids():
                 try:
                     config,_,_=self.store.read_config(eid)
+                    self.sources[eid]=Monitor.source(config)
                     valid_monitor_keys.update(self.monitor_key(eid,config,endpoint) for endpoint in config.monitor_api)
                     if not config.background_monitoring:continue
                     groups.setdefault(Monitor.source(config),[]).append((eid,config))

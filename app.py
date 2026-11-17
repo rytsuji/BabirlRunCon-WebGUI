@@ -24,7 +24,7 @@ from background import BackgroundMonitor
 from service import ControlService
 from storage import Store, now
 
-BUILD_ID = "v1-20261117-daq-state-priority-42"
+BUILD_ID = "v1-20261117-run-outcome-44"
 BASE = Path(__file__).resolve().parent
 
 
@@ -419,9 +419,7 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
             if run and run['status']=='running' and state.get('start_time') and run.get('started_at')==state['start_time'] and state.get('stop_time') and state.get('raw_config',{}).get('runinfo',{}).get('runstatus')=='IDLE':
                 if run_timers.public(eid) and run_timers.public(eid).get('active'):
                     await run_timers.cancel(eid,'DAQ was stopped outside the GUI. Timer cancelled.')
-                run.update(status='completed',finished_at=state['stop_time'],daq_config=state['raw_config'],
-                           event_num=state.get('event_num'),es_event_num=state.get('es_event_num',{}))
-                store.put_run(eid,run)
+                store.finish_run(eid,run,state)
                 store.remember(eid,state)
                 store.clear_control_errors(eid)
         return {**observed,

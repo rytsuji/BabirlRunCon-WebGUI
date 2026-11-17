@@ -262,6 +262,28 @@ class Store:
             row = db.execute("SELECT rowid,data FROM runs WHERE status IN ('running','unknown') ORDER BY rowid DESC LIMIT 1").fetchone()
         return {**json.loads(row[1]), "_rowid": row[0]} if row else None
 
+    def record_acquisition_error(self,eid,state,messages):
+        run=self.active_run(eid)
+        if not run or not state.get('start_time') or any(run.get(a)!=state.get(b) for a,b in
+                (('runname','runname'),('runnumber','runnumber'),('started_at','start_time'))):return
+        error='\n'.join(dict.fromkeys([*str(run.get('error') or '').splitlines(),*messages]))
+        if error and error!=run.get('error'):
+            run['error']=error
+            self.put_run(eid,run)
+
+    def finish_run(self,eid,run,state):
+        # A running acquisition can recover before Stop. Keep its recorded fault
+        # even if the final state is healthy or the Stop worker held an older copy.
+        saved=self.active_run(eid)
+        errors=[run.get('error'),saved.get('error') if saved and saved.get('_rowid')==run.get('_rowid') else None]
+        errors.extend(str(value) for key,value in state.get('acquisition_errors',{}).items() if key!='target' and value)
+        error='\n'.join(dict.fromkeys(line for value in errors if value for line in str(value).splitlines()))
+        run.update(status='aborted' if error else 'completed',finished_at=state['stop_time'],
+                   daq_config=state['raw_config'],event_num=state.get('event_num'),
+                   es_event_num=state.get('es_event_num',{}))
+        if error:run['error']=error
+        self.put_run(eid,run)
+
     @staticmethod
     def public_run(run):
         # Read old records without retaining their duplicate snapshots or UUIDs.

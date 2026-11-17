@@ -12,13 +12,15 @@ function mountRunTimer({root,base,request,onChange,onError}) {
     for(const name of ['header','ender'])get('#'+name+'-edit').checked=value;
   }
   setCommentEditable(true);
-  const enderStorageKey='babirl-ender:'+base;
-  function saveEnder(){
-    try{localStorage.setItem(enderStorageKey,get('#run-ender').value);}catch{}
+  const savedComments=new Set();
+  function saveComment(name){
+    savedComments.add(name);
+    try{localStorage.setItem('babirl-'+name+':'+base,get('#run-'+name).value);}catch{}
   }
-  try{
-    const saved=localStorage.getItem(enderStorageKey);
-    if(saved!==null)get('#run-ender').value=saved;
+  function saveComments(){for(const name of ['header','ender'])saveComment(name);}
+  for(const name of ['header','ender'])try{
+    const saved=localStorage.getItem('babirl-'+name+':'+base);
+    if(saved!==null){get('#run-'+name).value=saved;savedComments.add(name);}
   }catch{}
   const storageKey='babirl-run-timer:'+base;
   function savePreferences(){
@@ -81,7 +83,7 @@ function mountRunTimer({root,base,request,onChange,onError}) {
   for(const name of ['header','ender'])get('#'+name+'-edit').onchange=()=>{render();onChange();};
   return {
     starting(){
-      saveEnder();
+      saveComments();
       awaitingPlan=enabled.checked;
       dirtyComments.clear();commentQueue={};
       setCommentEditable(false);lockPhase='running';render();
@@ -102,7 +104,7 @@ function mountRunTimer({root,base,request,onChange,onError}) {
       render();
     },
     changeComment(name,value){
-      if(name==='ender')saveEnder();
+      saveComment(name);
       if(!state?.active && !awaitingPlan)return;
       dirtyComments.add(name);
       if(new TextEncoder().encode(value).length>79 || value.includes('\0'))return;
@@ -138,10 +140,11 @@ function mountRunTimer({root,base,request,onChange,onError}) {
           if(!dirtyComments.has(name))input.value=value[name] ?? '';
         }
       }
-      if(value?.active){saveEnder();flushComments();}
+      if(value?.active){saveComments();flushComments();}
       render();
     },
     active:()=>!!state?.active,
+    hasComment:name=>savedComments.has(name),
     defersStop:()=>!!state?.active && state.repeat,
     finishRequested:()=>!!state?.active && state.finish_requested,
     async finish(){state=await request(base+'/timer/finish',{method:'POST'});render();onChange();},

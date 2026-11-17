@@ -97,6 +97,8 @@ optionally, a URL path (ID). The description starts blank; Run history is not co
 Enter an **Ender** below Header before pressing Stop. It is sent with Stop and
 stored by babirl when closing a saved Run. Blank uses `no ender`.
 Header and Ender each accept at most 79 UTF-8 bytes.
+Both input drafts are remembered per experiment in the current browser and survive
+Stop and page reloads. Before the first saved Header, the input uses DAQ readback.
 
 Enable **Timer** above the Run buttons and enter hours, minutes and seconds.
 Start with the normal **Start** or **NSSTA** button. Time is counted after DAQ
@@ -141,6 +143,10 @@ state and verify their results.
 Use **Show Run History** on an experiment card to view saved Runs without starting
 babirl or the Run Control API. This page uses the same Mode, Details and JSON views
 as the Run History tab and does not contact DAQ.
+Runs with recorded DAQ acquisition errors finish as **aborted**, even if Stop
+succeeds or the ES recovers before Stop. Normal Runs finish as **completed**.
+Additional API failures do not change the Run outcome. After Stop APIs receive
+the same saved Run JSON as Run History.
 
 Register a **Title** and **Link** under **Links** in Edit configuration.
 The **Link** tab is always shown at the end of the tabs and opens links in a new tab.
