@@ -148,6 +148,11 @@ succeeds or the ES recovers before Stop. Normal Runs finish as **completed**.
 Additional API failures do not change the Run outcome. After Stop APIs receive
 the same saved Run JSON as Run History.
 
+Register **File size APIs** (such as `monitor_file` `/size`) in Edit configuration to
+record each DAQ's file size (`data.bytes`) after a saved Stop and plot the rate
+and relative deviation under **Run History**. Use **Fetch missing** or **Re-fetch all**
+to read sizes for earlier Runs.
+
 Register a **Title** and **Link** under **Links** in Edit configuration.
 The **Link** tab is always shown at the end of the tabs and opens links in a new tab.
 

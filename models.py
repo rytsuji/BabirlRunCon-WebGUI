@@ -107,6 +107,12 @@ class MonitorEndpoint(EnabledEndpoint):
     timing: Literal['always','running','idle'] = 'always'
 
 
+class FileSizeEndpoint(EnabledEndpoint):
+    """GET {api}?runname=&runnumber= returning {"status":"ok","data":{"bytes":N}} for one DAQ."""
+    timeout_sec: float = Field(default=10, ge=1, le=3600)
+    delay_sec: float = Field(default=5, ge=0, le=3600)
+
+
 class ManualArgument(QueryArgument):
     source: Literal['custom','runname','runnumber','header','event_num','start_time','stop_time','state','getconfig_json','current_run_json'] = 'custom'
     placeholder: str = Field(default='',max_length=1000)
@@ -167,6 +173,7 @@ class ExperimentConfig(Strict):
     stop_api: list[StopHook] = Field(default_factory=list, max_length=100)
     monitor_api: list[MonitorEndpoint] = Field(default_factory=list,max_length=100)
     manual_api: list[ManualEndpoint] = Field(default_factory=list,max_length=100)
+    file_size_api: list[FileSizeEndpoint] = Field(default_factory=list,max_length=8)
     links: list[Link] = Field(default_factory=list,max_length=100)
     babimo: Babimo = Field(default_factory=Babimo)
 
@@ -175,6 +182,20 @@ class ExperimentConfig(Strict):
     def empty_hooks(cls, value):
         # A YAML key with only comments is null, not an empty list.
         return [] if value is None else value
+
+    @field_validator("file_size_api", mode="before")
+    @classmethod
+    def empty_file_size_api(cls, value):
+        return [] if value is None else value
+
+    @field_validator("file_size_api")
+    @classmethod
+    def unique_file_size_names(cls, value):
+        # Recorded sizes are keyed by API name.
+        names = [item.name for item in value]
+        if len(names) != len(set(names)):
+            raise ValueError('File size API names must be unique')
+        return value
 
     @model_validator(mode="before")
     @classmethod

@@ -23,6 +23,7 @@ class ControlService:
         self.tasks = set()
         self.task_by_op = {}
         self.monitor = None
+        self.on_run_completed = None  # Called with (eid, run) after a saved Run is stored as completed.
 
     def key(self, config):
         return config.eb.host.strip().lower()
@@ -366,6 +367,8 @@ class ControlService:
                 self.store.clear_control_errors(eid)
                 op['daq_completed']=True
                 after_started=True
+                if mode!='nssta' and self.on_run_completed:
+                    self.on_run_completed(eid,run)
                 await self.hooks(eid,run_config,op,run_config.stop_api,mode=='nssta',state=state,timing='after',best_effort=True,run_record=run)
             elif action == "restart":
                 restart_errors=[]

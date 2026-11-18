@@ -311,3 +311,46 @@ class Store:
                     run["status"] = "unknown"
                     run["error"] = "Backend restarted during Run preparation. Verify DAQ state."
                     self.put_run(eid, run)
+
+    @staticmethod
+    def file_size_table(db):
+        db.execute("""CREATE TABLE IF NOT EXISTS run_file_sizes (
+            run_rowid INTEGER NOT NULL, source TEXT NOT NULL, bytes INTEGER,
+            file_count INTEGER, error TEXT, checked_at TEXT NOT NULL,
+            PRIMARY KEY (run_rowid, source))""")
+
+    def put_file_size(self, eid, run_rowid, source, result):
+        # Keep a recorded size when a later read fails; the files may have been moved.
+        with self.connect(eid) as db:
+            self.file_size_table(db)
+            if result.get("bytes") is None and db.execute(
+                    "SELECT 1 FROM run_file_sizes WHERE run_rowid=? AND source=? AND bytes IS NOT NULL",
+                    (run_rowid, source)).fetchone():
+                return False
+            db.execute("INSERT OR REPLACE INTO run_file_sizes VALUES (?,?,?,?,?,?)",
+                       (run_rowid, source, result.get("bytes"), result.get("file_count"),
+                        result.get("error"), result["checked_at"]))
+            db.execute("INSERT OR REPLACE INTO metadata VALUES ('file_size_version',?)", (uuid4().hex,))
+            return True
+
+    def file_size_runs(self, eid, limit=50):
+        """Latest completed saved Runs, oldest first, with recorded sizes by source."""
+        with self.connect(eid) as db:
+            self.file_size_table(db)
+            rows = db.execute("SELECT rowid,data FROM runs WHERE mode!='nssta' AND status IN ('completed','aborted') "
+                              "ORDER BY rowid DESC LIMIT ?", (limit,)).fetchall()
+            sizes = {}
+            if rows:
+                marks = ",".join("?" * len(rows))
+                for row in db.execute(f"SELECT * FROM run_file_sizes WHERE run_rowid IN ({marks})",
+                                      [row[0] for row in rows]):
+                    sizes.setdefault(row["run_rowid"], {})[row["source"]] = {
+                        key: row[key] for key in ("bytes", "file_count", "error", "checked_at")}
+        return [{**json.loads(data), "_rowid": rowid, "file_sizes": sizes.get(rowid, {})}
+                for rowid, data in reversed(rows)]
+
+    def file_size_version(self, eid):
+        with self.connect(eid) as db:
+            run = db.execute("SELECT MAX(rowid) FROM runs WHERE mode!='nssta' AND status IN ('completed','aborted')").fetchone()
+            sizes = db.execute("SELECT value FROM metadata WHERE key='file_size_version'").fetchone()
+        return f"{run[0]}:{sizes[0] if sizes else ''}"

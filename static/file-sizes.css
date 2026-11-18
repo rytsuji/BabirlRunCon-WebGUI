@@ -1,0 +1,52 @@
+/* Run history Mode select: inline and compact like the File size controls. */
+#view-history>.panel-head>label.actions{flex-wrap:nowrap;gap:7px;font-size:12px;color:var(--muted)}
+#view-history>.panel-head>label.actions>.input{width:auto;padding:4px 8px;font-size:12px}
+.fs-section{border-bottom:1px solid var(--line)}
+.fs-summary{padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:13px;font-weight:600;color:#191c20;list-style:none}
+.fs-summary::-webkit-details-marker{display:none}
+.fs-summary>span::before{content:"▸ "}
+.fs-section[open]>.fs-summary>span::before{content:"▾ "}
+.fs-section:not([open]) .fs-toolbar{display:none}
+.fs-body{padding:4px 14px 14px}
+.fs-toolbar{gap:8px}
+.fs-range{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted)}
+.fs-range .input{width:auto;padding:4px 8px;font-size:12px}
+.fs-message .notice{margin:0 0 12px}
+.fs-message p{margin:0 0 8px}
+.fs-legend{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:11.5px;margin-bottom:6px}
+.fs-legend-item{display:inline-flex;align-items:center;gap:6px}
+.fs-legend-name{font-weight:600;color:#252a31}
+.fs-charts{position:relative}
+.fs-loading .fs-charts,.fs-loading .fs-table{opacity:.55}
+.fs-plot{position:relative;touch-action:pan-y}
+.fs-plot:focus-visible{outline:3px solid #a6bfff;outline-offset:2px}
+.fs-plot svg{display:block}
+.fs-frame{fill:none;stroke:#aab0b8;stroke-width:1;shape-rendering:crispEdges}
+.fs-axis-tick{stroke:#aab0b8;stroke-width:1;shape-rendering:crispEdges}
+.fs-band{fill:#f2f4f7}
+.fs-grid{stroke:var(--line);stroke-width:1;shape-rendering:crispEdges}
+.fs-reference{stroke:#b9bec6;stroke-width:1;shape-rendering:crispEdges}
+.fs-crosshair{stroke:#c3c8cf;stroke-width:1;shape-rendering:crispEdges}
+.fs-tick{fill:#68707a;font-size:11px;font-variant-numeric:tabular-nums}
+.fs-ylabel{fill:#5b626d;font-size:10.5px;font-weight:500}
+.fs-line{fill:none;stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+.fs-marker{stroke:none}
+.fs-marker-active,.fs-marker-out{stroke:#fff;stroke-width:1.5}
+.fs-legend-value,.fs-dev{font-variant-numeric:tabular-nums;color:#4d535c}
+.fs-dev-out{color:var(--red);font-weight:600}
+.fs-tooltip{position:absolute;top:12px;z-index:3;pointer-events:none;background:#fff;border:1px solid var(--line);border-radius:7px;box-shadow:0 6px 18px rgba(25,28,32,.13);padding:9px 11px;font-size:12px;min-width:210px;max-width:340px}
+.fs-tip-head{display:flex;justify-content:space-between;gap:14px;margin-bottom:6px}
+.fs-tip-grid{display:grid;grid-template-columns:12px auto auto auto;align-items:center;gap:0 10px}
+.fs-tip-name{color:#4d535c}
+.fs-tip-rate,.fs-tip-grid .fs-dev{text-align:right;font-variant-numeric:tabular-nums}
+.fs-tip-detail{grid-column:2/-1;color:var(--muted);font-size:11px;overflow-wrap:anywhere;margin-bottom:4px}
+.fs-key{display:block;width:12px;height:2px;border-radius:1px}
+.fs-table{margin-top:6px}
+.fs-table summary{cursor:pointer;font-size:12px;color:#3b4048;width:max-content}
+.fs-table .table-scroll{margin-top:8px;max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:6px}
+.fs-table th,.fs-table td{padding:7px 12px;font-variant-numeric:tabular-nums}
+.fs-table thead{position:sticky;top:0;z-index:1}
+.fs-table .fs-group{border-left:1px solid var(--line);color:#3b4048}
+.fs-table .fs-group svg{vertical-align:middle;margin-right:6px}
+.fs-cell-missing{color:var(--amber);white-space:normal;min-width:170px}
+@media(max-width:650px){.fs-toolbar{width:100%}.fs-tooltip{min-width:180px}}

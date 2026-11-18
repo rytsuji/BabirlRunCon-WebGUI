@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import Field, field_validator, model_validator
 
 from controllers import HttpController
+import file_sizes
 from manual_api import execute_manual
 from models import Babimo, Experiment, ExperimentConfig, RunControlEndpoint, ServerConfig, Strict
 from run_timer import RunTimers
@@ -163,6 +164,11 @@ class BackgroundSetting(Strict):
     revision: str
 
 
+class FileSizeRefresh(Strict):
+    limit: int = Field(default=50, ge=1, le=500, strict=True)
+    force: bool = False
+
+
 def create_app(settings=None, experiments_dir=None, controller=None, http_client=None, monitor_http_client=None):
     settings = settings or ServerConfig()
     store = Store(experiments_dir or BASE / settings.experiments_dir)
@@ -175,6 +181,15 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
     background=BackgroundMonitor(monitor,service,store,monitor_client)
     run_timers = RunTimers(service, monitor)
     manual_tasks=set()
+    size_tasks=set()
+    size_refreshing=set()
+
+    def record_file_sizes(eid, run):
+        task=asyncio.create_task(file_sizes.collect_after_stop(store,monitor_client,eid,run['_rowid'],run['runname'],run['runnumber']))
+        size_tasks.add(task)
+        task.add_done_callback(size_tasks.discard)
+
+    service.on_run_completed=record_file_sizes
 
     @asynccontextmanager
     async def lifespan(app):
@@ -186,6 +201,8 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
             await background.close()
             for task in list(manual_tasks):task.cancel()
             await asyncio.gather(*manual_tasks,return_exceptions=True)
+            for task in list(size_tasks):task.cancel()
+            await asyncio.gather(*size_tasks,return_exceptions=True)
             await run_timers.close()
             await service.close()
             if http_client is None:
@@ -705,6 +722,31 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
             return await asyncio.shield(task) if restricted else await task
         except asyncio.CancelledError:
             return JSONResponse({'success':False,'error':'Request cancelled'},status_code=499)
+
+    @app.get('/api/experiments/{eid}/file-sizes')
+    async def file_size_history(eid:str,limit:int=50):
+        config,_,_=config_for(eid)
+        runs=store.file_size_runs(eid,min(max(limit,1),500))
+        return {'sources':[{'name':item.name,'enabled':item.enabled} for item in config.file_size_api],
+                'runs':[file_sizes.public_run(run) for run in runs],'version':store.file_size_version(eid)}
+
+    @app.get('/api/experiments/{eid}/file-sizes/version')
+    async def file_size_version(eid:str):
+        config_for(eid)
+        return {'version':store.file_size_version(eid)}
+
+    @app.post('/api/experiments/{eid}/file-sizes/refresh')
+    async def file_size_refresh(eid:str,body:FileSizeRefresh):
+        config,_,_=config_for(eid)
+        if not any(item.enabled for item in config.file_size_api):
+            raise HTTPException(409,'No enabled File size API')
+        if eid in size_refreshing:
+            raise HTTPException(409,'File sizes are already being read')
+        size_refreshing.add(eid)
+        try:
+            return await file_sizes.refresh(store,monitor_client,eid,config,body.limit,body.force)
+        finally:
+            size_refreshing.discard(eid)
 
     app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 
