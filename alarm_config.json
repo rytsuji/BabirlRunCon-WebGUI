@@ -1,0 +1,33 @@
+{
+  "enabled": true,
+  "statuses": {
+    "disconnected": true,
+    "state_error": true,
+    "acquisition": true,
+    "api_monitor": true
+  },
+  "detectors": {
+    "eb": true,
+    "api": true,
+    "daq": true,
+    "es_61": true,
+    "es_100": true,
+    "es_181": true,
+    "monitor:TRB3 monitor": true,
+    "monitor:STRASSE data file monitor": false,
+    "monitor:STRASSE disk monitor": false,
+    "es_all": true
+  },
+  "detector_labels": {
+    "eb": "Event Builder (EventBuilder)",
+    "api": "Run Control API",
+    "daq": "DAQ System / General",
+    "es_61": "ES efn=61 (10.42.0.185) [mpv]",
+    "es_100": "ES efn=100 (localhost) [trb3]",
+    "es_181": "ES efn=181 (10.42.0.251) [strasse]",
+    "monitor:TRB3 monitor": "Monitor: TRB3 monitor",
+    "monitor:STRASSE data file monitor": "Monitor: STRASSE data file monitor",
+    "monitor:STRASSE disk monitor": "Monitor: STRASSE disk monitor",
+    "es_all": "Event Senders (Common)"
+  }
+}

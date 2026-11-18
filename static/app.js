@@ -328,6 +328,7 @@ async function controlPage(eid, config, version, revision) {
       refreshRequested=true;poll();return result;
     }});
   const manualAPIs=mountManualAPIs({base,items:config.manual_api || [],revision,getState:()=>current,onBusyChange:()=>{controls();poll();},isLive:()=>version===routeVersion});
+  const alarm=mountAlarm({eid,config,utilities,isLive:()=>version===routeVersion});
   const controlCleanup=pageCleanup;pageCleanup=()=>{manualAPIs.destroy();controlCleanup();};
   let selectedModule = "control";
   monitorContext();
@@ -344,6 +345,7 @@ async function controlPage(eid, config, version, revision) {
     }
     utilities.activate(name);
     manualAPIs.activate(name==="api");
+    alarm.activate(name==="alarm");
     monitorContext();
     if(returningToControl) { connectionsRequested=true;forceConnections=true; refreshRequested=true; poll(); }
   }

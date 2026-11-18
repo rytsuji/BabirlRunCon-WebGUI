@@ -23,6 +23,7 @@ from monitor import Monitor
 from background import BackgroundMonitor
 from service import ControlService
 from storage import Store, now
+from alarm import install_alarm
 
 BUILD_ID = "v1-20261117-run-outcome-44"
 BASE = Path(__file__).resolve().parent
@@ -197,6 +198,9 @@ def create_app(settings=None, experiments_dir=None, controller=None, http_client
     app.state.background = background
     app.state.service = service
     app.state.run_timers = run_timers
+
+    # alarm sound
+    install_alarm(app, BUILD_ID)
 
     @app.middleware("http")
     async def same_origin(request: Request, call_next):
