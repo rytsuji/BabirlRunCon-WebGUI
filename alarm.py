@@ -67,6 +67,8 @@ def _clean_stale_entries(cfg: Dict[str, Any]) -> bool:
 def _default_config() -> Dict[str, Any]:
     return {
         "enabled": True,
+        "timer_notify": True,
+        "timer_repeat": True,
         "statuses": {item["id"]: True for item in STATUS_CONDITIONS},
         "detectors": {det_id: True for det_id in DEFAULT_DETECTORS},
         "detector_labels": dict(DEFAULT_DETECTORS),
@@ -81,6 +83,10 @@ def _load_config() -> Dict[str, Any]:
             if isinstance(saved, dict):
                 if "enabled" in saved:
                     cfg["enabled"] = bool(saved["enabled"])
+                if "timer_notify" in saved:
+                    cfg["timer_notify"] = bool(saved["timer_notify"])
+                if "timer_repeat" in saved:
+                    cfg["timer_repeat"] = bool(saved["timer_repeat"])
                 if isinstance(saved.get("statuses"), dict):
                     for k, v in saved["statuses"].items():
                         if k in cfg["statuses"]:
@@ -118,6 +124,8 @@ def _es_sort_key(det_id: str):
 
 def render_alarm_panel(cfg: Dict[str, Any]) -> str:
     enabled = bool(cfg.get("enabled", True))
+    timer_notify = bool(cfg.get("timer_notify", True))
+    timer_repeat = bool(cfg.get("timer_repeat", True))
     statuses: Dict[str, bool] = cfg.get("statuses", {})
     detectors: Dict[str, bool] = cfg.get("detectors", {})
     labels: Dict[str, str] = cfg.get("detector_labels", {})
@@ -189,6 +197,26 @@ def render_alarm_panel(cfg: Dict[str, Any]) -> str:
             f'</div>'
         )
 
+    timer_box_html = f"""
+    <div style="border:1px solid #dce7ff;border-radius:6px;padding:8px 10px;margin-top:10px;background:#f4f7fd">
+      <div class="actions" style="justify-content:space-between;margin-bottom:4px">
+        <span style="font-size:11px;font-weight:700;color:#24549d">Run Timer Completion Notice</span>
+        <div class="actions">
+          <button class="button small" type="button" id="alarm-timer-test-btn">Test Chime</button>
+          <button class="button small blue" type="button" id="alarm-timer-dismiss-btn" hidden>Dismiss</button>
+        </div>
+      </div>
+      <label class="check-label" style="margin-bottom:4px">
+        <input type="checkbox" data-alarm-timer="notify" {"checked" if timer_notify else ""}>
+        <span>Play completion chime when timed Run stops</span>
+      </label>
+      <label class="check-label">
+        <input type="checkbox" data-alarm-timer="repeat" {"checked" if timer_repeat else ""}>
+        <span>Repeat chime every 4 seconds until dismissed</span>
+      </label>
+    </div>
+    """
+
     return f"""
     <div class="panel utility-panel">
       <div class="panel-head">
@@ -204,6 +232,7 @@ def render_alarm_panel(cfg: Dict[str, Any]) -> str:
       </div>
       <div class="panel-body">
         <div id="alarm-active-notice" class="notice red section" role="alert" hidden></div>
+        <div id="alarm-timer-notice" class="notice section" role="status" hidden></div>
         <div class="two-columns">
           <div class="field">
             <div class="actions" style="justify-content:space-between;margin-bottom:6px">
@@ -224,9 +253,10 @@ def render_alarm_panel(cfg: Dict[str, Any]) -> str:
               </div>
             </div>
             {"".join(status_rows)}
+            {timer_box_html}
           </div>
         </div>
-        <p class="form-note">Triggers when BOTH a checked target and a checked error condition occur. Repeats every 3 seconds until Stop Alarm is clicked.</p>
+        <p class="form-note">Error alarm triggers when BOTH a checked target and a checked error condition occur (repeats every 3s until Stop Alarm is clicked). Timer completion chime triggers when a timed Run finishes.</p>
       </div>
     </div>
     """.strip()
@@ -239,6 +269,8 @@ class DetectorMeta(BaseModel):
 
 class AlarmConfigUpdate(BaseModel):
     enabled: Optional[bool] = None
+    timer_notify: Optional[bool] = None
+    timer_repeat: Optional[bool] = None
     statuses: Optional[Dict[str, bool]] = None
     detectors: Optional[Dict[str, bool]] = None
     register_detectors: Optional[Dict[str, Union[DetectorMeta, str]]] = None
@@ -264,6 +296,14 @@ def install_alarm(app: FastAPI, build_id: Optional[str] = None):
 
         if payload.enabled is not None:
             alarm_state["enabled"] = bool(payload.enabled)
+            changed = True
+
+        if payload.timer_notify is not None:
+            alarm_state["timer_notify"] = bool(payload.timer_notify)
+            changed = True
+
+        if payload.timer_repeat is not None:
+            alarm_state["timer_repeat"] = bool(payload.timer_repeat)
             changed = True
 
         if payload.statuses is not None:

@@ -5,9 +5,12 @@
   window.__daqAlarmInstalled = true;
 
   const REPEAT_INTERVAL_MS = 3000;
+  const TIMER_REPEAT_INTERVAL_MS = 4000;
 
   let config = {
     enabled: true,
+    timer_notify: true,
+    timer_repeat: true,
     statuses: {
       disconnected: true,
       state_error: true,
@@ -35,7 +38,16 @@
   let isUnloading = false;
   let activeMonitorItems = [];
   let floatingStopBtn = null;
+  let floatingTimerBtn = null;
   let floatingArmBadge = null;
+
+  // Run timer completion tracking
+  let initializedTimerTracking = false;
+  let lastNotifiedTimerId = "";
+  let timerLatched = false;
+  let timerMessage = "";
+  let lastTimerPlayedAt = 0;
+  let pendingTimerPlay = false;
 
   const errorBuckets = {
     status: [],
@@ -81,7 +93,7 @@
         color: #ffffff;
         border-bottom-color: #991b1b;
         border-radius: 5px 5px 0 0;
-        padding: 0 8px 9px; /* ◀ 2px 9px 7px から変更 */
+        padding: 0 8px 9px;
         font-weight: 700;
         animation: daq-alarm-off-blink 1.4s ease-in-out infinite;
       }
@@ -90,12 +102,27 @@
         color: #ffffff;
         border-bottom-color: #7f1d1d;
         border-radius: 5px 5px 0 0;
-        padding: 0 8px 9px; /* ◀ 2px 9px 7px から変更 */
+        padding: 0 8px 9px;
         font-weight: 700;
         animation: daq-alarm-firing-blink 0.7s ease-in-out infinite;
       }
     `;
     (document.head || document.documentElement).appendChild(style);
+  }
+
+  function showBriefToast(message) {
+    try {
+      const existing = document.getElementById("daq-alarm-timer-toast");
+      if (existing) existing.remove();
+      const el = document.createElement("div");
+      el.id = "daq-alarm-timer-toast";
+      el.className = "toast";
+      el.textContent = message;
+      document.body.appendChild(el);
+      setTimeout(() => {
+        if (el.parentNode) el.remove();
+      }, 6000);
+    } catch (_) {}
   }
 
   function isDetectorEnabled(detId) {
@@ -164,6 +191,33 @@
     return true;
   }
 
+  // Pleasant ascending C5-E5-G5-C6 completion chime for timed Run stop
+  function emitTimerChime() {
+    if (!audioCtx || audioCtx.state !== "running") return false;
+
+    const now = audioCtx.currentTime;
+    const notes = [
+      { d: 0.00, f: 523.25, t: 0.22 }, // C5
+      { d: 0.14, f: 659.25, t: 0.22 }, // E5
+      { d: 0.28, f: 783.99, t: 0.24 }, // G5
+      { d: 0.44, f: 1046.50, t: 0.55 } // C6
+    ];
+    notes.forEach(({ d, f, t }) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(f, now + d);
+      gain.gain.setValueAtTime(0.001, now + d);
+      gain.gain.linearRampToValueAtTime(0.26, now + d + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + d + t);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(now + d);
+      osc.stop(now + d + t);
+    });
+    return true;
+  }
+
   function triggerAlarmNow(forceTest = false) {
     if (!forceTest && !config.enabled) return;
     const ctx = ensureContext();
@@ -202,6 +256,40 @@
       });
   }
 
+  function triggerTimerChimeNow(forceTest = false) {
+    if (!forceTest && (!config.enabled || !config.timer_notify)) return;
+    const ctx = ensureContext();
+    if (!ctx) return;
+
+    if (ctx.state === "running") {
+      audioUnlocked = true;
+      updateAlarmUI();
+      if (emitTimerChime()) {
+        if (!forceTest) lastTimerPlayedAt = Date.now();
+        pendingTimerPlay = false;
+      }
+      return;
+    }
+
+    ctx.resume()
+      .then(() => {
+        audioUnlocked = ctx.state === "running";
+        updateAlarmUI();
+        if (ctx.state === "running" && (forceTest || (config.enabled && config.timer_notify && timerLatched))) {
+          if (emitTimerChime()) {
+            if (!forceTest) lastTimerPlayedAt = Date.now();
+            pendingTimerPlay = false;
+          }
+        } else if (!forceTest) {
+          pendingTimerPlay = true;
+        }
+      })
+      .catch(() => {
+        if (!forceTest) pendingTimerPlay = true;
+        updateAlarmUI();
+      });
+  }
+
   function onUserGesture() {
     const ctx = ensureContext();
     if (!ctx) return;
@@ -213,6 +301,8 @@
           updateAlarmUI();
           if ((pendingPlay || latched) && config.enabled && latched) {
             triggerAlarmNow();
+          } else if ((pendingTimerPlay || timerLatched) && config.enabled && config.timer_notify && timerLatched) {
+            triggerTimerChimeNow();
           }
         })
         .catch(() => {});
@@ -222,15 +312,82 @@
       updateAlarmUI();
       if (pendingPlay && config.enabled && latched) {
         triggerAlarmNow();
+      } else if (pendingTimerPlay && config.enabled && config.timer_notify && timerLatched) {
+        triggerTimerChimeNow();
       }
-    } else if (pendingPlay && config.enabled && latched) {
-      triggerAlarmNow();
+    } else {
+      if (pendingPlay && config.enabled && latched) triggerAlarmNow();
+      if (pendingTimerPlay && config.enabled && config.timer_notify && timerLatched) triggerTimerChimeNow();
     }
   }
 
   ["pointerdown", "mousedown", "click", "touchstart", "keydown"].forEach((ev) =>
     window.addEventListener(ev, onUserGesture, { passive: true, capture: true })
   );
+
+  function formatDurationLabel(sec) {
+    const s = Math.max(0, Number(sec) || 0);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const rem = s % 60;
+    const parts = [];
+    if (h > 0) parts.push(`${h}h`);
+    if (m > 0) parts.push(`${m}m`);
+    if (rem > 0 || parts.length === 0) parts.push(`${rem}s`);
+    return parts.join(" ");
+  }
+
+  function handleRunTimerStatus(rt) {
+    if (!rt || typeof rt !== "object" || !rt.id) {
+      initializedTimerTracking = true;
+      return;
+    }
+
+    if (!initializedTimerTracking) {
+      initializedTimerTracking = true;
+      if (!rt.active && ["completed", "cancelled", "failed"].includes(rt.phase)) {
+        lastNotifiedTimerId = rt.id;
+      }
+      return;
+    }
+
+    if (rt.active) {
+      // If a new timer run starts, clear any previous completion notice
+      if (timerLatched && rt.id !== lastNotifiedTimerId) {
+        dismissTimerNotice();
+      }
+      return;
+    }
+
+    if (rt.id === lastNotifiedTimerId) return;
+
+    if (rt.phase === "completed") {
+      lastNotifiedTimerId = rt.id;
+      const durText = formatDurationLabel(rt.duration_sec);
+      const runsText = rt.repeat && rt.total_runs > 1 ? `, ${rt.total_runs} runs` : "";
+      timerMessage = `Timed Run completed and stopped (${durText}${runsText}).`;
+      showBriefToast(`⏱️ ${timerMessage}`);
+
+      if (config.timer_notify) {
+        timerLatched = true;
+        lastTimerPlayedAt = 0;
+        updateAlarmUI();
+        triggerTimerChimeNow();
+        if (!config.timer_repeat) {
+          // One-shot chime mode: play once and clear repeat latch after initial playback
+          pendingTimerPlay = false;
+        }
+      }
+    } else if (rt.phase === "cancelled" || rt.phase === "failed") {
+      lastNotifiedTimerId = rt.id;
+    }
+  }
+
+  function dismissTimerNotice() {
+    timerLatched = false;
+    pendingTimerPlay = false;
+    updateAlarmUI();
+  }
 
   function formatEsLabel(item, efn) {
     const hostPart = item.host ? ` (${item.host})` : "";
@@ -356,6 +513,14 @@
         detectorId: "daq",
         statusType: "state_error",
         message: "Operation failed: " + (data.active_operation.message || data.active_operation.id || "")
+      });
+    }
+    if (data.run_timer?.phase === "failed") {
+      items.push({
+        key: "timer_fail:" + (data.run_timer.id || ""),
+        detectorId: "daq",
+        statusType: "state_error",
+        message: "Timer stopped with error: " + (data.run_timer.message || "failed")
       });
     }
 
@@ -484,6 +649,9 @@
           message: "Status API failed: " + detail
         }];
       } else {
+        if (data && typeof data === "object") {
+          handleRunTimerStatus(data.run_timer);
+        }
         errorBuckets.status = parseStatusPayload(url, data, newDetectors);
         if (data && typeof data === "object" && data.es_connections !== undefined) {
           errorBuckets.connections = [];
@@ -557,9 +725,20 @@
   }
 
   function tickAlarm() {
-    if (!config.enabled || !latched) return;
-    if (Date.now() - lastPlayedAt < REPEAT_INTERVAL_MS) return;
-    triggerAlarmNow();
+    if (!config.enabled) return;
+
+    if (latched) {
+      if (Date.now() - lastPlayedAt >= REPEAT_INTERVAL_MS) {
+        triggerAlarmNow();
+      }
+      return;
+    }
+
+    if (timerLatched && config.timer_notify && config.timer_repeat) {
+      if (Date.now() - lastTimerPlayedAt >= TIMER_REPEAT_INTERVAL_MS) {
+        triggerTimerChimeNow();
+      }
+    }
   }
 
   setInterval(tickAlarm, 500);
@@ -622,6 +801,8 @@
 
   async function saveServerConfig(patch) {
     if (patch.enabled !== undefined) config.enabled = Boolean(patch.enabled);
+    if (patch.timer_notify !== undefined) config.timer_notify = Boolean(patch.timer_notify);
+    if (patch.timer_repeat !== undefined) config.timer_repeat = Boolean(patch.timer_repeat);
     if (patch.statuses) Object.assign(config.statuses, patch.statuses);
     if (patch.detectors) Object.assign(config.detectors, patch.detectors);
     if (patch.register_detectors) {
@@ -642,6 +823,11 @@
           delete config.detector_labels[k];
         }
       }
+    }
+
+    if (!config.timer_notify && timerLatched) {
+      timerLatched = false;
+      pendingTimerPlay = false;
     }
 
     if (latched) {
@@ -702,6 +888,22 @@
       stopAlarm();
     });
 
+    view.querySelector("#alarm-timer-test-btn")?.addEventListener("click", () => {
+      triggerTimerChimeNow(true);
+    });
+
+    view.querySelector("#alarm-timer-dismiss-btn")?.addEventListener("click", () => {
+      dismissTimerNotice();
+    });
+
+    view.querySelectorAll("input[data-alarm-timer]").forEach((cb) => {
+      cb.addEventListener("change", () => {
+        const key = cb.getAttribute("data-alarm-timer");
+        if (key === "notify") saveServerConfig({ timer_notify: cb.checked });
+        else if (key === "repeat") saveServerConfig({ timer_repeat: cb.checked });
+      });
+    });
+
     view.querySelectorAll("input[data-alarm-detector]").forEach((cb) => {
       cb.addEventListener("change", () => {
         const detId = cb.getAttribute("data-alarm-detector");
@@ -740,7 +942,7 @@
     const isBlocked = config.enabled && !audioUnlocked;
 
     if (floatingArmBadge) {
-      const showArm = isBlocked && !latched;
+      const showArm = isBlocked && !latched && !timerLatched;
       floatingArmBadge.style.display = showArm ? "inline-block" : "none";
     }
 
@@ -755,11 +957,27 @@
       }
     }
 
+    if (floatingTimerBtn) {
+      const nextDisplay = timerLatched ? "inline-block" : "none";
+      if (floatingTimerBtn.style.display !== nextDisplay) {
+        floatingTimerBtn.style.display = nextDisplay;
+      }
+      floatingTimerBtn.style.bottom = latched ? "58px" : "16px";
+      const nextTimerText = isBlocked
+        ? "🔊 Click to Chime / Dismiss Timer"
+        : "⏱️ Timed Run Stopped (Dismiss)";
+      if (floatingTimerBtn.textContent !== nextTimerText) {
+        floatingTimerBtn.textContent = nextTimerText;
+      }
+    }
+
     const tabBtn = document.getElementById("tab-alarm");
     if (tabBtn) {
       const nextLabel = latched
         ? (isBlocked ? "Alarm (! 🔇)" : "Alarm (!)")
-        : (isOff ? "Alarm (OFF)" : (isBlocked ? "Alarm (🔇)" : "Alarm"));
+        : timerLatched
+          ? "Alarm (⏱️)"
+          : (isOff ? "Alarm (OFF)" : (isBlocked ? "Alarm (🔇)" : "Alarm"));
       if (tabBtn.textContent !== nextLabel) {
         tabBtn.textContent = nextLabel;
       }
@@ -775,6 +993,11 @@
       panelStopBtn.hidden = !latched;
     }
 
+    const panelTimerDismissBtn = view.querySelector("#alarm-timer-dismiss-btn");
+    if (panelTimerDismissBtn && panelTimerDismissBtn.hidden !== !timerLatched) {
+      panelTimerDismissBtn.hidden = !timerLatched;
+    }
+
     const notice = view.querySelector("#alarm-active-notice");
     if (notice) {
       const shouldHide = !latched || latchedErrors.length === 0;
@@ -786,6 +1009,20 @@
           latchedErrors.map((e) => `<div>${escapeHtml(e.message)}</div>`).join("");
         if (notice.innerHTML !== nextHtml) {
           notice.innerHTML = nextHtml;
+        }
+      }
+    }
+
+    const timerNotice = view.querySelector("#alarm-timer-notice");
+    if (timerNotice) {
+      const shouldHideTimer = !timerLatched || !timerMessage;
+      if (timerNotice.hidden !== shouldHideTimer) {
+        timerNotice.hidden = shouldHideTimer;
+      }
+      if (!shouldHideTimer) {
+        const nextHtml = `<strong>Run Timer Completed</strong><div>${escapeHtml(timerMessage)}</div>`;
+        if (timerNotice.innerHTML !== nextHtml) {
+          timerNotice.innerHTML = nextHtml;
         }
       }
     }
@@ -807,6 +1044,23 @@
       document.body.appendChild(arm);
     }
 
+    if (!document.getElementById("daq-timer-dismiss-btn")) {
+      const tbtn = document.createElement("button");
+      tbtn.id = "daq-timer-dismiss-btn";
+      tbtn.type = "button";
+      tbtn.className = "button blue";
+      tbtn.textContent = "⏱️ Timed Run Stopped (Dismiss)";
+      floatingTimerBtn = tbtn;
+
+      Object.assign(tbtn.style, {
+        position: "fixed", right: "16px", bottom: "16px", zIndex: "99999",
+        display: "none", borderRadius: "999px", fontWeight: "bold",
+        boxShadow: "0 4px 14px rgba(35, 94, 232, 0.45)"
+      });
+      tbtn.addEventListener("click", dismissTimerNotice);
+      document.body.appendChild(tbtn);
+    }
+
     if (!document.getElementById("daq-alarm-ack-btn")) {
       const btn = document.createElement("button");
       btn.id = "daq-alarm-ack-btn";
@@ -816,7 +1070,7 @@
       floatingStopBtn = btn;
 
       Object.assign(btn.style, {
-        position: "fixed", right: "16px", bottom: "16px", zIndex: "99999",
+        position: "fixed", right: "16px", bottom: "16px", zIndex: "100000",
         display: "none", borderRadius: "999px", fontWeight: "bold",
         boxShadow: "0 4px 14px rgba(220, 38, 38, 0.5)"
       });
@@ -860,6 +1114,9 @@
       destroy() {
         activeMonitorItems = [];
         errorBuckets.monitors = {};
+        initializedTimerTracking = false;
+        lastNotifiedTimerId = "";
+        timerLatched = false;
       }
     };
   };
