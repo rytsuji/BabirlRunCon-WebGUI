@@ -333,7 +333,7 @@ async function controlPage(eid, config, version, revision) {
     }});
   const manualAPIs=mountManualAPIs({base,items:config.manual_api || [],revision,getState:()=>current,onBusyChange:()=>{controls();poll();},isLive:()=>version===routeVersion});
   const alarm=mountAlarm({eid,config,utilities,isLive:()=>version===routeVersion});
-  const controlCleanup=pageCleanup;pageCleanup=()=>{manualAPIs.destroy();controlCleanup();};
+  const controlCleanup=pageCleanup;pageCleanup=()=>{alarm.destroy();manualAPIs.destroy();controlCleanup();};
   const sizeCleanup=pageCleanup;pageCleanup=()=>{fileSizes.destroy();sizeCleanup();};
   let selectedModule = "control";
   monitorContext();

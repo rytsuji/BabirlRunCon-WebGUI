@@ -49,6 +49,55 @@
     isUnloading = true;
   });
 
+  function ensureAlarmStyles() {
+    if (document.getElementById("daq-alarm-style")) return;
+    const style = document.createElement("style");
+    style.id = "daq-alarm-style";
+    style.textContent = `
+      @keyframes daq-alarm-off-blink {
+        0%, 100% {
+          background-color: #dc2626;
+          color: #ffffff;
+          box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.45);
+        }
+        50% {
+          background-color: #fee2e2;
+          color: #b91c1c;
+          box-shadow: 0 0 8px 1px rgba(220, 38, 38, 0.35);
+        }
+      }
+      @keyframes daq-alarm-firing-blink {
+        0%, 100% {
+          background-color: #b91c1c;
+          color: #ffffff;
+        }
+        50% {
+          background-color: #fef2f2;
+          color: #991b1b;
+        }
+      }
+      #tab-alarm.alarm-tab-off {
+        background-color: #dc2626;
+        color: #ffffff;
+        border-bottom-color: #991b1b;
+        border-radius: 5px 5px 0 0;
+        padding: 0 8px 9px; /* ◀ 2px 9px 7px から変更 */
+        font-weight: 700;
+        animation: daq-alarm-off-blink 1.4s ease-in-out infinite;
+      }
+      #tab-alarm.alarm-tab-firing {
+        background-color: #b91c1c;
+        color: #ffffff;
+        border-bottom-color: #7f1d1d;
+        border-radius: 5px 5px 0 0;
+        padding: 0 8px 9px; /* ◀ 2px 9px 7px から変更 */
+        font-weight: 700;
+        animation: daq-alarm-firing-blink 0.7s ease-in-out infinite;
+      }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+  }
+
   function isDetectorEnabled(detId) {
     if (Object.prototype.hasOwnProperty.call(config.detectors, detId)) {
       return Boolean(config.detectors[detId]);
@@ -183,11 +232,22 @@
     window.addEventListener(ev, onUserGesture, { passive: true, capture: true })
   );
 
+  function formatEsLabel(item, efn) {
+    const hostPart = item.host ? ` (${item.host})` : "";
+    if (item.name) {
+      return `efn=${efn}: ${item.name}${hostPart}`;
+    }
+    return `efn=${efn}${hostPart}`;
+  }
+
   function processEsObject(esObj, itemsOut, newDetectors) {
     if (!esObj || typeof esObj !== "object") return;
     if (esObj.error) {
       if (!Object.prototype.hasOwnProperty.call(config.detectors, "es_all")) {
-        newDetectors["es_all"] = { label: "Event Senders (Common)", default_enabled: true };
+        newDetectors["es_all"] = {
+          label: "ES Common (overall ES query error)",
+          default_enabled: true
+        };
       }
       itemsOut.push({
         key: "es_err:" + esObj.error,
@@ -201,12 +261,10 @@
         if (!item || typeof item !== "object") return;
         const efn = item.efn !== undefined && item.efn !== null ? String(item.efn) : String(idx);
         const detId = "es_" + efn;
-        const hostPart = item.host ? ` (${item.host})` : "";
-        const namePart = item.name ? ` [${item.name}]` : "";
-        const label = `ES efn=${efn}${hostPart}${namePart}`;
+        const label = formatEsLabel(item, efn);
 
-        if (!Object.prototype.hasOwnProperty.call(config.detectors, detId)) {
-          newDetectors[detId] = { label, default_enabled: true };
+        if (!Object.prototype.hasOwnProperty.call(config.detectors, detId) || config.detector_labels[detId] !== label) {
+          newDetectors[detId] = { label, default_enabled: isDetectorEnabled(detId) };
         }
 
         if (item.error) {
@@ -214,14 +272,14 @@
             key: `es_${efn}:${item.error}`,
             detectorId: detId,
             statusType: "disconnected",
-            message: `ES efn=${efn}${hostPart}: ${item.error}`
+            message: `ES ${label}: ${item.error}`
           });
         } else if (item.connected === false) {
           itemsOut.push({
             key: `es_${efn}:disconnected`,
             detectorId: detId,
             statusType: "disconnected",
-            message: `ES efn=${efn}${hostPart}: Disconnected`
+            message: `ES ${label}: Disconnected`
           });
         }
       });
@@ -305,7 +363,10 @@
       if (!v || k === "target") continue;
       const detId = k.includes("/es") ? "es_all" : "daq";
       if (detId === "es_all" && !Object.prototype.hasOwnProperty.call(config.detectors, "es_all")) {
-        newDetectors["es_all"] = { label: "Event Senders (Common)", default_enabled: true };
+        newDetectors["es_all"] = {
+          label: "ES Common (overall ES query error)",
+          default_enabled: true
+        };
       }
       items.push({
         key: `acq:${k}:${v}`,
@@ -317,6 +378,39 @@
 
     processEsObject(data.es_connections, items, newDetectors);
     return items;
+  }
+
+  function syncExperimentConfig(expConfig, pruneMonitors = true) {
+    if (!expConfig || typeof expConfig !== "object") return;
+    activeMonitorItems = Array.isArray(expConfig.monitor_api) ? expConfig.monitor_api : [];
+
+    const reg = {};
+    const validMonitorIds = [];
+
+    if (expConfig.eb?.name) {
+      reg["eb"] = {
+        label: `Event Builder (${expConfig.eb.name})`,
+        default_enabled: isDetectorEnabled("eb")
+      };
+    }
+
+    activeMonitorItems.forEach((m) => {
+      if (!m || !m.name) return;
+      const detId = "monitor:" + m.name;
+      validMonitorIds.push(detId);
+      const disabledSuffix = m.enabled === false ? " (disabled in YAML)" : "";
+      reg[detId] = {
+        label: `${m.name}${disabledSuffix}`,
+        default_enabled: !/strasse/i.test(m.name)
+      };
+    });
+
+    const patch = {};
+    if (Object.keys(reg).length > 0) patch.register_detectors = reg;
+    if (pruneMonitors) patch.valid_monitor_ids = validMonitorIds;
+    if (Object.keys(patch).length > 0) {
+      saveServerConfig(patch);
+    }
   }
 
   function syncAlarmState() {
@@ -373,6 +467,13 @@
     if (isUnloading || url.includes("/api/alarm")) return;
     const newDetectors = {};
 
+    if (ok && data && typeof data === "object" && data.config && Array.isArray(data.config.monitor_api)) {
+      errorBuckets.monitors = {};
+      syncExperimentConfig(data.config, true);
+      syncAlarmState();
+      return;
+    }
+
     if (url.includes("/status")) {
       if (!ok) {
         const detail = (data && typeof data === "object" && data.detail) ? data.detail : "HTTP error";
@@ -415,19 +516,15 @@
       }
     } else if (url.includes("/monitors/")) {
       const mMatch = url.match(/\/monitors\/(\d+)/);
-      const idx = mMatch ? Number(mMatch[1]) : 0;
-      const monMeta = activeMonitorItems[idx];
-      const monName = monMeta?.name || `Monitor #${idx + 1}`;
+      const idx = mMatch ? Number(mMatch[1]) : -1;
+      const monMeta = idx >= 0 ? activeMonitorItems[idx] : null;
+      if (!monMeta || !monMeta.name) {
+        return;
+      }
+      const monName = monMeta.name;
       const detId = "monitor:" + monName;
 
-      if (!Object.prototype.hasOwnProperty.call(config.detectors, detId)) {
-        newDetectors[detId] = {
-          label: `Monitor: ${monName}`,
-          default_enabled: !/strasse/i.test(monName)
-        };
-      }
-
-      if (!ok || (data && (data.status === "fail" || data.status === "error"))) {
+      if (!ok || (data && (data.status === "fail" || data.status === "error" || data.status === "timeout"))) {
         const msg = (data && (data.message || data.detail)) || "Monitor failed";
         errorBuckets.monitors[idx] = [{
           key: `monitor_${idx}:${msg}`,
@@ -537,6 +634,15 @@
         config.detector_labels[k] = label;
       }
     }
+    if (Array.isArray(patch.valid_monitor_ids)) {
+      const validSet = new Set(patch.valid_monitor_ids);
+      for (const k of Object.keys(config.detectors)) {
+        if (k.startsWith("monitor:") && !validSet.has(k)) {
+          delete config.detectors[k];
+          delete config.detector_labels[k];
+        }
+      }
+    }
 
     if (latched) {
       const stillActive = latchedErrors.filter(
@@ -629,6 +735,8 @@
   }
 
   function updateAlarmUI() {
+    ensureAlarmStyles();
+    const isOff = !config.enabled;
     const isBlocked = config.enabled && !audioUnlocked;
 
     if (floatingArmBadge) {
@@ -651,10 +759,12 @@
     if (tabBtn) {
       const nextLabel = latched
         ? (isBlocked ? "Alarm (! 🔇)" : "Alarm (!)")
-        : (!config.enabled ? "Alarm (OFF)" : (isBlocked ? "Alarm (🔇)" : "Alarm"));
+        : (isOff ? "Alarm (OFF)" : (isBlocked ? "Alarm (🔇)" : "Alarm"));
       if (tabBtn.textContent !== nextLabel) {
         tabBtn.textContent = nextLabel;
       }
+      tabBtn.classList.toggle("alarm-tab-off", isOff && !latched);
+      tabBtn.classList.toggle("alarm-tab-firing", Boolean(latched));
     }
 
     const view = document.getElementById("view-alarm");
@@ -716,29 +826,11 @@
   }
 
   window.mountAlarm = function mountAlarm(context) {
+    ensureAlarmStyles();
     ensureContext();
     ensureFloatingControls();
 
-    activeMonitorItems = Array.isArray(context.config?.monitor_api) ? context.config.monitor_api : [];
-
-    const reg = {};
-    if (context.config?.eb?.name) {
-      reg["eb"] = {
-        label: `Event Builder (${context.config.eb.name})`,
-        default_enabled: isDetectorEnabled("eb")
-      };
-    }
-    activeMonitorItems.forEach((m, idx) => {
-      const name = m?.name || `Monitor #${idx + 1}`;
-      const detId = "monitor:" + name;
-      reg[detId] = {
-        label: `Monitor: ${name}`,
-        default_enabled: !/strasse/i.test(name)
-      };
-    });
-    if (Object.keys(reg).length > 0) {
-      saveServerConfig({ register_detectors: reg });
-    }
+    syncExperimentConfig(context.config, true);
 
     const tabList = document.querySelector(".control-page .tabs");
     const footer = document.querySelector(".control-page .footer");
@@ -775,11 +867,13 @@
   loadServerConfig();
   if (document.readyState === "loading") {
     window.addEventListener("DOMContentLoaded", () => {
+      ensureAlarmStyles();
       ensureContext();
       ensureFloatingControls();
       updateAlarmUI();
     });
   } else {
+    ensureAlarmStyles();
     ensureContext();
     ensureFloatingControls();
     updateAlarmUI();

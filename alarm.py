@@ -1,5 +1,6 @@
 import html
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 from fastapi import FastAPI
@@ -9,17 +10,58 @@ BASE = Path(__file__).resolve().parent
 CONFIG_PATH = BASE / "alarm_config.json"
 
 STATUS_CONDITIONS: List[Dict[str, str]] = [
-    {"id": "disconnected", "label": "Connection lost / refused (ES / EB / API)"},
-    {"id": "state_error", "label": "DAQ state error / control command failure"},
-    {"id": "acquisition", "label": "Acquisition / event counter read error"},
-    {"id": "api_monitor", "label": "Monitor failure / API HTTP error"},
+    {
+        "id": "disconnected",
+        "label": "Connection lost / refused",
+        "desc": "ES nodes, Event Builder (EB), or Run Control API disconnected",
+    },
+    {
+        "id": "state_error",
+        "label": "DAQ state error / command failure",
+        "desc": "DAQ state is ERROR, or Start / Stop / Restart operation failed",
+    },
+    {
+        "id": "acquisition",
+        "label": "Acquisition / readout error",
+        "desc": "Event counter or readout error reported during run",
+    },
+    {
+        "id": "api_monitor",
+        "label": "Monitor / HTTP API failure",
+        "desc": "Monitor API returned FAIL / ERROR / TIMEOUT, or HTTP request failed",
+    },
 ]
 
 DEFAULT_DETECTORS: Dict[str, str] = {
-    "eb": "Event Builder (EB / babild)",
+    "eb": "Event Builder (EB)",
     "api": "Run Control API",
-    "daq": "DAQ System / General",
+    "daq": "DAQ System / General (state & readout)",
 }
+
+SYNTHETIC_MONITOR_RE = re.compile(r"^monitor:Monitor #\d+$")
+
+
+def _clean_stale_entries(cfg: Dict[str, Any]) -> bool:
+    changed = False
+    detectors = cfg.get("detectors", {})
+    labels = cfg.get("detector_labels", {})
+
+    for key in list(detectors.keys()):
+        if SYNTHETIC_MONITOR_RE.match(key):
+            detectors.pop(key, None)
+            labels.pop(key, None)
+            changed = True
+
+    for key in list(labels.keys()):
+        if SYNTHETIC_MONITOR_RE.match(key):
+            labels.pop(key, None)
+            changed = True
+
+    if labels.get("es_all") == "Event Senders (Common)":
+        labels["es_all"] = "ES Common (overall ES query error)"
+        changed = True
+
+    return changed
 
 
 def _default_config() -> Dict[str, Any]:
@@ -53,6 +95,8 @@ def _load_config() -> Dict[str, Any]:
                         cfg["detector_labels"].setdefault(k, k)
         except Exception:
             pass
+    if _clean_stale_entries(cfg):
+        _save_config(cfg)
     return cfg
 
 
@@ -63,31 +107,86 @@ def _save_config(cfg: Dict[str, Any]) -> None:
         pass
 
 
+def _es_sort_key(det_id: str):
+    if det_id == "es_all":
+        return (1, 999999, det_id)
+    m = re.match(r"^es_(\d+)$", det_id)
+    if m:
+        return (0, int(m.group(1)), det_id)
+    return (0, 999998, det_id)
+
+
 def render_alarm_panel(cfg: Dict[str, Any]) -> str:
     enabled = bool(cfg.get("enabled", True))
     statuses: Dict[str, bool] = cfg.get("statuses", {})
     detectors: Dict[str, bool] = cfg.get("detectors", {})
     labels: Dict[str, str] = cfg.get("detector_labels", {})
 
-    detector_rows = []
-    for det_id, label in labels.items():
+    core_ids = [k for k in ("eb", "api", "daq") if k in labels]
+    es_ids = sorted(
+        [k for k in labels if k == "es_all" or k.startswith("es_")],
+        key=_es_sort_key,
+    )
+    monitor_ids = [k for k in labels if k.startswith("monitor:")]
+    other_ids = [
+        k for k in labels
+        if k not in core_ids and k not in es_ids and k not in monitor_ids
+    ]
+
+    def render_checkbox(det_id: str) -> str:
+        raw_label = labels.get(det_id, det_id)
+        if det_id.startswith("monitor:") and raw_label.startswith("Monitor: "):
+            raw_label = raw_label[len("Monitor: "):]
         checked = "checked" if detectors.get(det_id, True) else ""
-        detector_rows.append(
+        return (
             f'<label class="check-label">'
             f'<input type="checkbox" data-alarm-detector="{html.escape(det_id)}" {checked}>'
-            f'{html.escape(label)}'
+            f'<span>{html.escape(raw_label)}</span>'
             f'</label>'
         )
+
+    def render_group(title: str, subtitle: str, ids: List[str]) -> str:
+        if not ids:
+            return ""
+        rows = "".join(render_checkbox(i) for i in ids)
+        return (
+            f'<div style="border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin-bottom:8px;background:#fafbfd">'
+            f'<div style="font-size:11px;font-weight:700;color:#24549d;margin-bottom:2px">{html.escape(title)}</div>'
+            f'<div style="font-size:10px;color:var(--muted);margin-bottom:6px">{html.escape(subtitle)}</div>'
+            f'{rows}'
+            f'</div>'
+        )
+
+    grouped_detectors_html = (
+        render_group(
+            "1. Core DAQ & Control",
+            "Main event builder, run control API, and general DAQ state/readout",
+            core_ids + other_ids,
+        )
+        + render_group(
+            "2. Event Senders (ES)",
+            "Individual front-end nodes (efn) and overall ES connection query",
+            es_ids,
+        )
+        + render_group(
+            "3. Monitor APIs",
+            "External status monitors defined in the experiment configuration",
+            monitor_ids,
+        )
+    )
 
     status_rows = []
     for st in STATUS_CONDITIONS:
         st_id = st["id"]
         checked = "checked" if statuses.get(st_id, True) else ""
         status_rows.append(
-            f'<label class="check-label">'
+            f'<div style="border:1px solid var(--line);border-radius:6px;padding:7px 10px;margin-bottom:7px;background:#fafbfd">'
+            f'<label class="check-label" style="margin-bottom:2px;font-weight:600">'
             f'<input type="checkbox" data-alarm-status="{html.escape(st_id)}" {checked}>'
-            f'{html.escape(st["label"])}'
+            f'<span>{html.escape(st["label"])}</span>'
             f'</label>'
+            f'<div style="font-size:10px;color:var(--muted);padding-left:22px">{html.escape(st["desc"])}</div>'
+            f'</div>'
         )
 
     return f"""
@@ -107,18 +206,18 @@ def render_alarm_panel(cfg: Dict[str, Any]) -> str:
         <div id="alarm-active-notice" class="notice red section" role="alert" hidden></div>
         <div class="two-columns">
           <div class="field">
-            <div class="actions" style="justify-content:space-between">
-              <label>Target Detectors / Nodes / Monitors</label>
+            <div class="actions" style="justify-content:space-between;margin-bottom:6px">
+              <label style="margin:0">Target Nodes & Monitors</label>
               <div class="actions">
                 <button class="button small" type="button" data-alarm-bulk="det-all">All</button>
                 <button class="button small" type="button" data-alarm-bulk="det-none">None</button>
               </div>
             </div>
-            {"".join(detector_rows)}
+            {grouped_detectors_html}
           </div>
           <div class="field">
-            <div class="actions" style="justify-content:space-between">
-              <label>Target Status Conditions</label>
+            <div class="actions" style="justify-content:space-between;margin-bottom:6px">
+              <label style="margin:0">Target Error Conditions</label>
               <div class="actions">
                 <button class="button small" type="button" data-alarm-bulk="st-all">All</button>
                 <button class="button small" type="button" data-alarm-bulk="st-none">None</button>
@@ -127,7 +226,7 @@ def render_alarm_panel(cfg: Dict[str, Any]) -> str:
             {"".join(status_rows)}
           </div>
         </div>
-        <p class="form-note">Repeats every 3 seconds when a checked item and status condition occur. Remains active until Stop Alarm is clicked.</p>
+        <p class="form-note">Triggers when BOTH a checked target and a checked error condition occur. Repeats every 3 seconds until Stop Alarm is clicked.</p>
       </div>
     </div>
     """.strip()
@@ -143,6 +242,7 @@ class AlarmConfigUpdate(BaseModel):
     statuses: Optional[Dict[str, bool]] = None
     detectors: Optional[Dict[str, bool]] = None
     register_detectors: Optional[Dict[str, Union[DetectorMeta, str]]] = None
+    valid_monitor_ids: Optional[List[str]] = None
 
 
 def install_alarm(app: FastAPI, build_id: Optional[str] = None):
@@ -160,17 +260,22 @@ def install_alarm(app: FastAPI, build_id: Optional[str] = None):
 
     @app.post("/api/alarm")
     async def set_alarm(payload: AlarmConfigUpdate):
-        changed = False
+        changed = _clean_stale_entries(alarm_state)
+
         if payload.enabled is not None:
             alarm_state["enabled"] = bool(payload.enabled)
             changed = True
+
         if payload.statuses is not None:
             for k, v in payload.statuses.items():
                 if k in alarm_state["statuses"]:
                     alarm_state["statuses"][k] = bool(v)
                     changed = True
+
         if payload.register_detectors is not None:
             for det_id, meta in payload.register_detectors.items():
+                if SYNTHETIC_MONITOR_RE.match(det_id):
+                    continue
                 if isinstance(meta, DetectorMeta):
                     label = meta.label or det_id
                     default_en = bool(meta.default_enabled)
@@ -185,11 +290,23 @@ def install_alarm(app: FastAPI, build_id: Optional[str] = None):
                 elif label and alarm_state["detector_labels"].get(det_id) != label:
                     alarm_state["detector_labels"][det_id] = label
                     changed = True
+
+        if payload.valid_monitor_ids is not None:
+            valid_set = set(payload.valid_monitor_ids)
+            for key in list(alarm_state["detectors"].keys()):
+                if key.startswith("monitor:") and key not in valid_set:
+                    alarm_state["detectors"].pop(key, None)
+                    alarm_state["detector_labels"].pop(key, None)
+                    changed = True
+
         if payload.detectors is not None:
             for det_id, v in payload.detectors.items():
+                if SYNTHETIC_MONITOR_RE.match(det_id):
+                    continue
                 alarm_state["detectors"][det_id] = bool(v)
                 alarm_state["detector_labels"].setdefault(det_id, det_id)
                 changed = True
+
         if changed:
             _save_config(alarm_state)
         return _response_payload()
