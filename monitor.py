@@ -133,8 +133,15 @@ class Monitor:
             if entry['state'].get('state')=='stopped' and entry['connected'] and time.monotonic()>=self.next_idle_check.get(eid,0):
                 self.next_idle_check[eid]=time.monotonic()+2
                 try:
-                    reader=getattr(self.adapter,'monitor_connections',self.adapter.connections) if safe_events else self.adapter.connections
-                    checked=await reader(eid,config,False,idle_only=True)
+                    prev=self.es_connections.get(eid) or {}
+                    need_reconnect=(prev.get('supported') and not prev.get('error') and not prev.get('all_on_connected')
+                                    and any(item.get('enabled') for item in prev.get('items',[]))
+                                    and entry['state'].get('target',{}).get('allow_writes') is not False)
+                    if need_reconnect and hasattr(self.adapter,'connections'):
+                        checked=await self.adapter.connections(eid,config,True,idle_only=True)
+                    else:
+                        reader=getattr(self.adapter,'monitor_connections',self.adapter.connections) if safe_events else self.adapter.connections
+                        checked=await reader(eid,config,False,idle_only=True)
                     checked.setdefault('checked_at',now())
                     if checked.get('runstatus'):
                         entry['state']['state']={'IDLE':'stopped','START':'running','NSSTA':'nssta'}.get(checked['runstatus'],'unknown')
