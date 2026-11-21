@@ -63,23 +63,57 @@ function formatTime(value) {
   if (!Number.isNaN(date.getTime()) && date.getFullYear()<=1970) return "—";
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString(undefined, {hour12:false});
 }
-function createAverageRate() {
-  let previous=null, display="-";
-  return status=>{
-    const state=status?.state;
-    const reset=()=>{previous=null;display="-";return display;};
-    if (!status?.connected || !["running","nssta"].includes(state?.state) || state.event_num==null ||
+function parseRunTimestamp(value) {
+  if (value == null || value === "") return NaN;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "number") return value > 1e12 ? value : value * 1000;
+  const text = String(value).trim();
+  if (/^\d+(\.\d+)?$/.test(text)) {
+    const num = Number(text);
+    return num > 1e12 ? num : num * 1000;
+  }
+  return Date.parse(text);
+}
+
+function createAverageRate(windowMs = 300_000) {
+  let samples = [], currentKey = null, display = "-";
+  return status => {
+    const state = status?.state;
+    const reset = () => { samples = []; currentKey = null; display = "-"; return display; };
+
+    if (!status?.connected || !["running", "nssta"].includes(state?.state) || state.event_num == null ||
         state.acquisition_errors?.["/api/v1/run/events"] || !status.events_at) return reset();
-    const events=Number(state.event_num), sampled=Date.parse(status.events_at);
-    if (!Number.isFinite(events) || events<0 || !Number.isFinite(sampled)) return reset();
-    const key=JSON.stringify([state.runname,state.runnumber,state.start_time]);
-    if (previous?.key===key && sampled===previous.sampled && events===previous.events) return display;
-    const old=previous;
-    previous={key,events,sampled};
-    if (!old || old.key!==key || sampled<=old.sampled || events<old.events) return display="-";
-    const rate=(events-old.events)/((sampled-old.sampled)/1000);
-    const [scale,unit]=rate>=1e9 ? [1e9,"GHz"] : rate>=1e6 ? [1e6,"MHz"] : rate>=1e3 ? [1e3,"kHz"] : [1,"Hz"];
-    return display=(rate/scale).toLocaleString(undefined,{maximumSignificantDigits:3})+" "+unit;
+
+    const events = Number(state.event_num);
+    const sampled = parseRunTimestamp(status.events_at);
+    if (!Number.isFinite(events) || events < 0 || !Number.isFinite(sampled)) return reset();
+
+    const key = JSON.stringify([state.runname, state.runnumber, state.start_time]);
+    if (key !== currentKey) {
+      currentKey = key;
+      samples = [{ events, sampled }];
+      return display = "-";
+    }
+
+    const latest = samples[samples.length - 1];
+    if (sampled === latest.sampled && events === latest.events) return display;
+    if (sampled <= latest.sampled || events < latest.events) {
+      samples = [{ events, sampled }];
+      return display = "-";
+    }
+
+    samples.push({ events, sampled });
+    while (samples.length > 2 && sampled - samples[1].sampled >= windowMs) {
+      samples.shift();
+    }
+
+    const oldest = samples[0];
+    const elapsedSec = (sampled - oldest.sampled) / 1000;
+    if (elapsedSec <= 0) return display = "-";
+
+    const rate = (events - oldest.events) / elapsedSec;
+    const [scale, unit] = rate >= 1e9 ? [1e9, "GHz"] : rate >= 1e6 ? [1e6, "MHz"] : rate >= 1e3 ? [1e3, "kHz"] : [1, "Hz"];
+    return display = (rate / scale).toLocaleString(undefined, { maximumSignificantDigits: 3 }) + " " + unit;
   };
 }
 function pretty(value) { return html(JSON.stringify(value, null, 2)); }
@@ -298,7 +332,7 @@ async function controlPage(eid, config, version, revision) {
         <div class="restart-row"><div><h3>Restart DAQ</h3></div><button class="button restart-button" id="restart" disabled>↻ Restart DAQ</button></div>
       </div></section>
       <section class="panel overview-panel"><div class="panel-head"><h2>Run overview</h2><div class="actions"><button class="button small" id="refresh-snapshot">↻ Refresh</button><span id="daq-state">${pill("CONNECTING")}</span></div></div><div class="panel-body">
-        <div class="stat-grid"><div><div class="stat-label">RUN NAME</div><div class="stat-value" id="live-name">—</div></div><div><div class="stat-label">CURRENT NUMBER</div><div class="stat-value" id="live-number">—</div></div><div><div class="stat-label">EVENTS</div><div class="stat-value blue" id="live-events">—</div></div><div><div class="stat-label">AVERAGE RATE</div><div class="stat-value blue" id="live-rate" title="Event count difference / elapsed seconds between counter samples">-</div></div></div>
+        <div class="stat-grid"><div><div class="stat-label">RUN NAME</div><div class="stat-value" id="live-name">—</div></div><div><div class="stat-label">CURRENT NUMBER</div><div class="stat-value" id="live-number">—</div></div><div><div class="stat-label">EVENTS</div><div class="stat-value blue" id="live-events">—</div></div><div><div class="stat-label">5 min AVERAGE RATE</div><div class="stat-value blue" id="live-rate" title="Event count difference / elapsed seconds between counter samples">-</div></div></div>
         <dl class="detail-list"><dt>Header</dt><dd id="live-header">—</dd><dt>Ender</dt><dd id="live-ender">—</dd><dt>Start time</dt><dd id="live-start">—</dd><dt>Stop time</dt><dd id="live-stop">—</dd></dl>
         <div id="es-counters" class="es-counters" aria-label="ES event counts"></div><div class="divider"></div><div class="actions"><button class="button small" id="show-config" aria-expanded="false" aria-controls="config-details">DAQ configuration</button><button class="button small" id="show-config-json" aria-expanded="false" aria-controls="config-details">DAQ configuration (JSON)</button></div><div id="config-details" hidden><div id="live-config" class="daq-format">Waiting for DAQ…</div></div>
         <p id="acquisition-warning" class="form-note error-text" hidden></p>
