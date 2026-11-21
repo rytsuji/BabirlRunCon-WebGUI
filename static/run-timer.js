@@ -61,7 +61,10 @@ function mountRunTimer({root,base,request,onChange,onError}) {
     const left=state?.remaining_sec;
     get('#timer-status').hidden=!enabled.checked && !active;
     get('#timer-status').textContent=state ? (active && left!=null ? `Time left ${Math.floor(left/3600)}h ${Math.floor(left/60)%60}m ${left%60}s${state.finish_requested ? ' · finishing this Run' : ''}` : state.message) : '';
-    get('#timer-status').classList.toggle('error-text',state?.phase==='failed');
+    const counting=active && left!=null;
+    const nearEnd=counting && state.duration_sec>0 && left<=state.duration_sec*.05;
+    get('#timer-status').classList.toggle('timer-countdown',counting);
+    get('#timer-status').classList.toggle('error-text',state?.phase==='failed' || nearEnd);
   }
   for(const input of [enabled,...fields.map(get)])input.addEventListener('input',()=>{
     if(!state?.active){ignoredId=state?.id ?? ignoredId;state=null;}
