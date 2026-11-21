@@ -75,17 +75,32 @@ function parseRunTimestamp(value) {
   return Date.parse(text);
 }
 
-function createAverageRate(windowMs = 300_000) {
+function getEsEventCount(state, targetEfn = "61") {
+  const counters = state?.es_event_num;
+  if (!counters || typeof counters !== "object") return null;
+
+  const entry = counters[String(targetEfn)] ?? Object.values(counters).find(
+    item => item && typeof item === "object" && String(item.efn ?? "") === String(targetEfn)
+  );
+  if (entry == null) return null;
+
+  const count = typeof entry === "object" ? entry.evtn : entry;
+  return count == null ? null : Number(count);
+}
+
+function createAverageRate(windowMs = 60_000, targetEfn = "61") {
   let samples = [], currentKey = null, display = "-";
   return status => {
     const state = status?.state;
     const reset = () => { samples = []; currentKey = null; display = "-"; return display; };
 
-    if (!status?.connected || !["running", "nssta"].includes(state?.state) || state.event_num == null ||
-        state.acquisition_errors?.["/api/v1/run/events"] || !status.events_at) return reset();
+    const events = getEsEventCount(state, targetEfn);
+    const sampledAt = status?.es_events_at ?? status?.timestamps?.es_events_at ?? status?.events_at;
 
-    const events = Number(state.event_num);
-    const sampled = parseRunTimestamp(status.events_at);
+    if (!status?.connected || !["running", "nssta"].includes(state?.state) || events == null ||
+        state.acquisition_errors?.["/api/v1/run/events/es"] || !sampledAt) return reset();
+
+    const sampled = parseRunTimestamp(sampledAt);
     if (!Number.isFinite(events) || events < 0 || !Number.isFinite(sampled)) return reset();
 
     const key = JSON.stringify([state.runname, state.runnumber, state.start_time]);
@@ -332,7 +347,7 @@ async function controlPage(eid, config, version, revision) {
         <div class="restart-row"><div><h3>Restart DAQ</h3></div><button class="button restart-button" id="restart" disabled>↻ Restart DAQ</button></div>
       </div></section>
       <section class="panel overview-panel"><div class="panel-head"><h2>Run overview</h2><div class="actions"><button class="button small" id="refresh-snapshot">↻ Refresh</button><span id="daq-state">${pill("CONNECTING")}</span></div></div><div class="panel-body">
-        <div class="stat-grid"><div><div class="stat-label">RUN NAME</div><div class="stat-value" id="live-name">—</div></div><div><div class="stat-label">CURRENT NUMBER</div><div class="stat-value" id="live-number">—</div></div><div><div class="stat-label">EVENTS</div><div class="stat-value blue" id="live-events">—</div></div><div><div class="stat-label">5 min AVERAGE RATE</div><div class="stat-value blue" id="live-rate" title="Event count difference / elapsed seconds between counter samples">-</div></div></div>
+        <div class="stat-grid"><div><div class="stat-label">RUN NAME</div><div class="stat-value" id="live-name">—</div></div><div><div class="stat-label">CURRENT NUMBER</div><div class="stat-value" id="live-number">—</div></div><div><div class="stat-label">EVENTS</div><div class="stat-value blue" id="live-events">—</div></div><div><div class="stat-label">1 min AVERAGE RATE</div><div class="stat-value blue" id="live-rate" title="Event count difference / elapsed seconds between counter samples">-</div></div></div>
         <dl class="detail-list"><dt>Header</dt><dd id="live-header">—</dd><dt>Ender</dt><dd id="live-ender">—</dd><dt>Start time</dt><dd id="live-start">—</dd><dt>Stop time</dt><dd id="live-stop">—</dd></dl>
         <div id="es-counters" class="es-counters" aria-label="ES event counts"></div><div class="divider"></div><div class="actions"><button class="button small" id="show-config" aria-expanded="false" aria-controls="config-details">DAQ configuration</button><button class="button small" id="show-config-json" aria-expanded="false" aria-controls="config-details">DAQ configuration (JSON)</button></div><div id="config-details" hidden><div id="live-config" class="daq-format">Waiting for DAQ…</div></div>
         <p id="acquisition-warning" class="form-note error-text" hidden></p>
