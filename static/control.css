@@ -104,7 +104,7 @@
 .monitor-card-head,.monitor-meta{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .monitor-card-head{font-size:12px;margin-bottom:8px}
 .monitor-status,.monitor-meta{font-size:10px;color:var(--muted)}
-.monitor-value{max-height:340px;overflow:auto;font-size:12px}
+.monitor-value{max-height:170px;overflow:auto;font-size:12px}
 .monitor-message{font-size:11px;white-space:pre-wrap;margin-top:6px}
 .monitor-meta{margin-top:8px}
 .monitor-warning{background:#fff8df;border-color:#e4bd52}
