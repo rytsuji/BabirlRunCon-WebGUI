@@ -32,6 +32,7 @@
 .fs-line{fill:none;stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
 .fs-marker{stroke:none}
 .fs-marker-active,.fs-marker-out{stroke:#fff;stroke-width:1.5}
+.fs-marker-clipped{stroke-width:2;stroke-linejoin:round;paint-order:stroke}
 .fs-legend-value,.fs-dev{font-variant-numeric:tabular-nums;color:#4d535c}
 .fs-dev-out{color:var(--red);font-weight:600}
 .fs-tooltip{position:absolute;top:12px;z-index:3;pointer-events:none;background:#fff;border:1px solid var(--line);border-radius:7px;box-shadow:0 6px 18px rgba(25,28,32,.13);padding:9px 11px;font-size:12px;min-width:210px;max-width:340px}

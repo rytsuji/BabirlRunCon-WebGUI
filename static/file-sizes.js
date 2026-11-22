@@ -1,6 +1,7 @@
 "use strict";
 
 const FILE_SIZE_COLORS=["#2c62a3","#c8612a","#2a8a6c","#b88a1b","#a65686","#5f7f2e","#6656ad","#b8453f"];
+let fileSizeClipSeq=0;
 
 // Same binary units as monitor_file's human_size.
 function binaryUnit(value) {
@@ -38,9 +39,10 @@ function logTicks(min,max) {
   return decades;
 }
 
-// Ticks for fractional deviations: always cover +-2*tolerance, at most 5 intervals.
-function deviationTicks(values,tolerance) {
-  const low=Math.min(-2*tolerance,...values), high=Math.max(2*tolerance,...values);
+// Ticks for fractional deviations: cover +-bound when fixed, or +-2*tolerance and all values when auto; at most 5 intervals.
+function deviationTicks(values,tolerance,bound=null) {
+  const low=bound>0 ? -bound : Math.min(-2*tolerance,...values);
+  const high=bound>0 ? bound : Math.max(2*tolerance,...values);
   for(let power=0.01;;power*=10){
     for(const unit of [5,10,20,25]){
       const step=unit*power, from=Math.floor(low/step+1e-9), to=Math.ceil(high/step-1e-9);
@@ -96,10 +98,18 @@ function mountFileSizes({base,eid,config,readOnly=false,isLive=()=>true,confirm=
   const tableScroll=document.querySelector("#view-history .table-scroll");
   if(!config?.file_size_api?.length || !tableScroll)return {activate(){},destroy(){}};
   const SVG="http://www.w3.org/2000/svg", RANGES=[20,50,100,200], TOP=8, RATE_H=108, DEV_H=92, PAD=8, AXIS=24, RIGHT=14, TOLERANCE=0.1;
+  const DEV_SCALES=[
+    {value:"0.2",label:"±20%",bound:0.2},
+    {value:"0.5",label:"±50%",bound:0.5},
+    {value:"1",label:"±100%",bound:1},
+    {value:"auto",label:"Auto",bound:null},
+  ];
   const storageKey="babirl-runcon:file-size-runs:"+eid;
-  let limit=50;
+  const devScaleKey="babirl-runcon:file-size-dev-scale:"+eid;
+  let limit=50, devScale="0.2";
   try{const saved=Number(localStorage.getItem(storageKey));if(RANGES.includes(saved))limit=saved;}catch{}
-  tableScroll.insertAdjacentHTML("beforebegin",`<details class="fs-section" open><summary class="fs-summary"><span>File size</span><div class="actions fs-toolbar"><label class="fs-range">Runs<select class="input" data-fs="limit">${RANGES.map(value=>`<option value="${value}"${value===limit ? " selected" : ""}>Last ${value}</option>`).join("")}</select></label><button class="button small" type="button" data-fs="refresh">↻ Refresh</button>${readOnly ? "" : '<button class="button small" type="button" data-fs="missing">Fetch missing</button><button class="button small" type="button" data-fs="all">Re-fetch all</button>'}</div></summary><div class="fs-body"><div class="fs-message" hidden></div><div class="fs-content" hidden><div class="fs-legend"></div><div class="fs-charts"><div class="fs-plot" tabindex="0" aria-label="File size rate and deviation by Run"></div><div class="fs-tooltip" role="status" hidden></div></div><details class="fs-table"><summary>Table</summary><div class="table-scroll"><table></table></div></details></div></div></details>`);
+  try{const saved=localStorage.getItem(devScaleKey);if(DEV_SCALES.some(item=>item.value===saved))devScale=saved;}catch{}
+  tableScroll.insertAdjacentHTML("beforebegin",`<details class="fs-section" open><summary class="fs-summary"><span>File size</span><div class="actions fs-toolbar"><label class="fs-range">Runs<select class="input" data-fs="limit">${RANGES.map(value=>`<option value="${value}"${value===limit ? " selected" : ""}>Last ${value}</option>`).join("")}</select></label><label class="fs-range">Deviation<select class="input" data-fs="dev-scale">${DEV_SCALES.map(item=>`<option value="${item.value}"${item.value===devScale ? " selected" : ""}>${item.label}</option>`).join("")}</select></label><button class="button small" type="button" data-fs="refresh">↻ Refresh</button>${readOnly ? "" : '<button class="button small" type="button" data-fs="missing">Fetch missing</button><button class="button small" type="button" data-fs="all">Re-fetch all</button>'}</div></summary><div class="fs-body"><div class="fs-message" hidden></div><div class="fs-content" hidden><div class="fs-legend"></div><div class="fs-charts"><div class="fs-plot" tabindex="0" aria-label="File size rate and deviation by Run"></div><div class="fs-tooltip" role="status" hidden></div></div><details class="fs-table"><summary>Table</summary><div class="table-scroll"><table></table></div></details></div></div></details>`);
   const root=document.querySelector("#view-history .fs-section");
   let data=null,series=[],hover=null,visible=false,requestId=0,pollId=0,busy=false,layout=null,frame=0,lastWidth=0,timer=null,error="";
   const get=selector=>root.querySelector(selector);
@@ -125,6 +135,16 @@ function mountFileSizes({base,eid,config,readOnly=false,isLive=()=>true,confirm=
     node("line",{x1:1,x2:17,y1:5,y2:5,stroke:color,"stroke-width":1.5,"stroke-linecap":"round"},key);
     node("circle",{cx:9,cy:5,r:2.5,fill:color},key);
     return key;
+  }
+  function clippedMarker(parent,cx,above,color,seamY,bottomY,active=false) {
+    const halfW=active ? 5 : 4;
+    const tipY=above ? seamY+(active ? 1.5 : 2) : bottomY-(active ? 1.5 : 2);
+    const baseY=above ? seamY+(active ? 8 : 7.5) : bottomY-(active ? 8 : 7.5);
+    return node("polygon",{
+      points:`${cx.toFixed(1)},${tipY.toFixed(1)} ${(cx-halfW).toFixed(1)},${baseY.toFixed(1)} ${(cx+halfW).toFixed(1)},${baseY.toFixed(1)}`,
+      fill:color,
+      class:active ? "fs-marker-active fs-marker-clipped" : "fs-marker-out fs-marker-clipped",
+    },parent);
   }
   const values=key=>series.flatMap(item=>item.points.map(point=>point[key])).filter(value=>value!=null);
   const deviationLabel=value=>element("span",value!=null && Math.abs(value)>TOLERANCE ? "fs-dev fs-dev-out" : "fs-dev",formatDeviation(value));
@@ -169,7 +189,8 @@ function mountFileSizes({base,eid,config,readOnly=false,isLive=()=>true,confirm=
     const rates=values("rate").filter(value=>value>0);
     const [scale,unit]=binaryUnit(Math.max(0,...rates) || 1);
     const rateTicks=rates.length ? logTicks(Math.min(...rates)/scale,Math.max(...rates)/scale) : [1,10];
-    const devTicks=deviationTicks(values("deviation"),TOLERANCE);
+    const devBound=DEV_SCALES.find(item=>item.value===devScale)?.bound ?? null;
+    const devTicks=deviationTicks(values("deviation"),TOLERANCE,devBound);
     const rateText=value=>String(Number(value.toPrecision(3))), devText=value=>String(Math.round(value*100)).replace("-","−");
     const maxTickW=Math.max(...rateTicks.map(value=>measure(rateText(value))),...devTicks.map(value=>measure(devText(value))));
     const left=Math.max(48,Math.ceil(maxTickW)+30);
@@ -179,11 +200,18 @@ function mountFileSizes({base,eid,config,readOnly=false,isLive=()=>true,confirm=
     const logMin=Math.log(rateTicks[0]), logSpan=Math.log(rateTicks.at(-1))-logMin;
     // Log axis; a zero rate sits on the bottom edge of the panel.
     const yRate=value=>value>0 ? TOP+PAD+(RATE_H-2*PAD)*(1-(Math.log(value)-logMin)/logSpan) : seamY;
-    const devMin=devTicks[0], devSpan=devTicks.at(-1)-devMin;
+    const devMin=devTicks[0], devMax=devTicks.at(-1), devSpan=devMax-devMin;
     const yDev=value=>seamY+PAD+(DEV_H-2*PAD)*(1-(value-devMin)/devSpan);
+    const yDevLine=value=>Math.max(seamY-2000,Math.min(bottomY+2000,yDev(value)));
 
     const svg=node("svg",{width,height,viewBox:`0 0 ${width} ${height}`,"aria-hidden":"true"});
-    node("rect",{x:x0,y:yDev(TOLERANCE),width:x1-x0,height:yDev(-TOLERANCE)-yDev(TOLERANCE),class:"fs-band"},svg);
+    const devClipId=`fs-dev-clip-${++fileSizeClipSeq}`;
+    const defs=node("defs",{},svg);
+    const clip=node("clipPath",{id:devClipId},defs);
+    node("rect",{x:x0,y:ySeam,width:Math.max(0,x1-x0),height:DEV_H},clip);
+
+    const bandTop=Math.max(ySeam,yDev(TOLERANCE)), bandBottom=Math.min(yBottom,yDev(-TOLERANCE));
+    if(bandBottom>bandTop)node("rect",{x:x0,y:bandTop,width:Math.max(0,x1-x0),height:bandBottom-bandTop,class:"fs-band"},svg);
     for(const [ticks,yFn] of [[rateTicks,yRate],[devTicks,yDev]]){
       for(const tick of ticks){
         const gy=Math.round(yFn(tick))+0.5;
@@ -194,22 +222,17 @@ function mountFileSizes({base,eid,config,readOnly=false,isLive=()=>true,confirm=
     node("line",{x1:x0,x2:x1,y1:zeroY,y2:zeroY,class:"fs-reference"},svg);
 
     const hoverLayer=node("g",{},svg);
-    // Points outside the tolerance band keep a larger marker at any density.
-    function drawSeries(yFn,valueFn,outside=()=>false) {
+    const x=index=>left+step*(index+.5);
+    function drawPaths(parent,yFn,valueFn) {
       for(const item of series){
         const points=item.points.map(valueFn);
         const path=points.map((value,index)=>value==null ? "" : `${points[index-1]==null ? "M" : "L"}${x(index).toFixed(1)} ${yFn(value).toFixed(1)}`).join("");
-        if(path)node("path",{d:path,stroke:item.color,class:"fs-line"},svg);
-        points.forEach((value,index)=>{
-          if(value==null)return;
-          if(outside(value))node("circle",{cx:x(index),cy:yFn(value),r:4,fill:item.color,class:"fs-marker-out"},svg);
-          else if(step>=12 || (points[index-1]==null && points[index+1]==null))node("circle",{cx:x(index),cy:yFn(value),r:2.5,fill:item.color,class:"fs-marker"},svg);
-        });
+        if(path)node("path",{d:path,stroke:item.color,class:"fs-line"},parent);
       }
     }
-    const x=index=>left+step*(index+.5);
-    drawSeries(yRate,point=>point.rate==null ? null : point.rate/scale);
-    drawSeries(yDev,point=>point.deviation,value=>Math.abs(value)>TOLERANCE);
+    const devClipLayer=node("g",{"clip-path":`url(#${devClipId})`},svg);
+    drawPaths(svg,yRate,point=>point.rate==null ? null : point.rate/scale);
+    drawPaths(devClipLayer,yDevLine,point=>point.deviation);
 
     node("rect",{x:x0,y:yTop,width:x1-x0,height:RATE_H,class:"fs-frame"},svg);
     node("rect",{x:x0,y:ySeam,width:x1-x0,height:DEV_H,class:"fs-frame"},svg);
@@ -244,9 +267,25 @@ function mountFileSizes({base,eid,config,readOnly=false,isLive=()=>true,confirm=
     const devLabel=node("text",{x:12,y:seamY+DEV_H/2,class:"fs-ylabel","text-anchor":"middle","dominant-baseline":"middle",transform:`rotate(-90 12 ${seamY+DEV_H/2})`},svg);
     devLabel.textContent="Deviation [%]";
 
+    // Points outside the tolerance band or clipped range keep a distinct marker at any density.
+    for(const item of series){
+      const rates=item.points.map(point=>point.rate==null ? null : point.rate/scale);
+      rates.forEach((value,index)=>{
+        if(value!=null && (step>=12 || (rates[index-1]==null && rates[index+1]==null)))
+          node("circle",{cx:x(index),cy:yRate(value),r:2.5,fill:item.color,class:"fs-marker"},svg);
+      });
+      const deviations=item.points.map(point=>point.deviation);
+      deviations.forEach((value,index)=>{
+        if(value==null)return;
+        if(value>devMax || value<devMin)clippedMarker(svg,x(index),value>devMax,item.color,seamY,bottomY);
+        else if(Math.abs(value)>TOLERANCE)node("circle",{cx:x(index),cy:yDev(value),r:4,fill:item.color,class:"fs-marker-out"},svg);
+        else if(step>=12 || (deviations[index-1]==null && deviations[index+1]==null))node("circle",{cx:x(index),cy:yDev(value),r:2.5,fill:item.color,class:"fs-marker"},svg);
+      });
+    }
+
     const activeLayer=node("g",{},svg);
     get(".fs-plot").replaceChildren(svg);
-    layout={left,step,count,width,x,bottom:bottomY,yRate,yDev,scale,hoverLayer,activeLayer};
+    layout={left,step,count,width,x,seamY,bottom:bottomY,yRate,yDev,devMin,devMax,scale,hoverLayer,activeLayer};
     renderHover();
   }
 
@@ -260,7 +299,10 @@ function mountFileSizes({base,eid,config,readOnly=false,isLive=()=>true,confirm=
     for(const item of series){
       const point=item.points[hover];
       if(point.rate!=null)node("circle",{cx:xPos,cy:layout.yRate(point.rate/layout.scale),r:4,fill:item.color,class:"fs-marker-active"},layout.activeLayer);
-      if(point.deviation!=null)node("circle",{cx:xPos,cy:layout.yDev(point.deviation),r:4,fill:item.color,class:"fs-marker-active"},layout.activeLayer);
+      if(point.deviation!=null){
+        if(point.deviation>layout.devMax || point.deviation<layout.devMin)clippedMarker(layout.activeLayer,xPos,point.deviation>layout.devMax,item.color,layout.seamY,layout.bottom,true);
+        else node("circle",{cx:xPos,cy:layout.yDev(point.deviation),r:4,fill:item.color,class:"fs-marker-active"},layout.activeLayer);
+      }
     }
     const run=data.runs[hover];
     const head=element("div","fs-tip-head");
@@ -367,6 +409,11 @@ function mountFileSizes({base,eid,config,readOnly=false,isLive=()=>true,confirm=
     limit=Number(event.target.value);
     try{localStorage.setItem(storageKey,String(limit));}catch{}
     load();
+  };
+  get('[data-fs="dev-scale"]').onchange=event=>{
+    devScale=event.target.value;
+    try{localStorage.setItem(devScaleKey,devScale);}catch{}
+    if(visible && data)renderCharts();
   };
   get('[data-fs="refresh"]').onclick=()=>load();
   if(!readOnly){get('[data-fs="missing"]').onclick=()=>refresh(false);get('[data-fs="all"]').onclick=()=>refresh(true);}
