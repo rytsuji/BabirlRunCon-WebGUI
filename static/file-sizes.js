@@ -97,7 +97,7 @@ function fileSizeSeries(data) {
 function mountFileSizes({base,eid,config,readOnly=false,isLive=()=>true,confirm=async()=>true,notify=()=>{}}) {
   const tableScroll=document.querySelector("#view-history .table-scroll");
   if(!config?.file_size_api?.length || !tableScroll)return {activate(){},destroy(){}};
-  const SVG="http://www.w3.org/2000/svg", RANGES=[20,50,100,200], TOP=8, RATE_H=108, DEV_H=92, PAD=8, AXIS=24, RIGHT=14, TOLERANCE=0.1;
+  const SVG="http://www.w3.org/2000/svg", RANGES=[5,10,20,50,100,200], TOP=8, RATE_H=108, DEV_H=92, PAD=8, AXIS=24, RIGHT=14, TOLERANCE=0.1;
   const DEV_SCALES=[
     {value:"0.2",label:"±20%",bound:0.2},
     {value:"0.5",label:"±50%",bound:0.5},
